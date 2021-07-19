@@ -1,11 +1,28 @@
 # script to convert the KAZR spectrum to Zarr file compatible with Voodoo
 using Zarr
 
-include("/home/pablo/LIM/repos/ARMtools.jl/src/ARMtools.jl")
+# Including ARM toolbox to read data:
+include(joinpath(homedir(), "LIM/repos/ARMtools.jl/src/ARMtools.jl"))
 
-spfile = "/home/pablo/LIM/data/utqiagvik-nsa/KAZR/SPECCOPOL/nsakazrspeccmaskgecopolC1.a0.20190127.010010.nc";
+# Defining constants:
+ARM_SITE = "utqiagvik-nsa"
+PATH = joinpath(homedir(), "LIM/remsens", ARM_SITE)
+RADARPRO = "KAZR/ARSCL"
+SPECTPRO = "KAZR/SPECCOPOL"
+# Date and hour to be read (spectrum data comes in hourly data files)
 
-# reading Spectrum Fil
+yy = 2019;
+mm = 1;
+dd = 27;
+hh = 03;
+
+# reading Radar Data
+rafile = ARMtools.getFilePattern(PATH, RADARPRO, yy, mm, dd)
+kazr = ARMtools.getKAZRData(rafile);
+
+# reading Spectrum Data
+spfile = ARMtools.getFilePattern(PATH, SPECTPRO, yy, mm, dd, hh)
+#spfile = "/home/pablo/LIM/data/utqiagvik-nsa/KAZR/SPECCOPOL/nsakazrspeccmaskgecopolC1.a0.20190127.010010.nc";
 spec = ARMtools.readSPECCOPOL(spfile);
 nt, nh = size(spec[:spect_mask]);
 
