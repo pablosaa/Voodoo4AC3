@@ -27,12 +27,13 @@ cln = CloudNet.readCLNFile(clnfile);
 
 # reading Spectrum Data
 spfile = ARMtools.getFilePattern(PATH, SPECTPRO, yy, mm, dd; hh)
-#spfile = "/home/pablo/LIM/data/utqiagvik-nsa/KAZR/SPECCOPOL/nsakazrspeccmaskgecopolC1.a0.20190127.010010.nc";
 spec = ARMtools.readSPECCOPOL(spfile);
 nt, nh = size(spec[:spect_mask]);
 
 ## MATCHING the CloudNet time vector with the Spectrum time vector:
-ii = #select indexes in cln[:time] corresponding to spec[:time];
+#select indexes in cln[:time] corresponding to spec[:time];
+ii = map(x->findfirst((abs.(x .- cln[:time])) .< Second(1)), spec[:time])
+ii_6spect = map(j->j-2:j, ii) |> collect
 
 ## TRYING with PyCall
 using PyCall, Dates
