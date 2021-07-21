@@ -31,9 +31,25 @@ spec = ARMtools.readSPECCOPOL(spfile);
 nt, nh = size(spec[:spect_mask]);
 
 ## MATCHING the CloudNet time vector with the Spectrum time vector:
-#select indexes in cln[:time] corresponding to spec[:time];
-ii = map(x->findfirst((abs.(x .- cln[:time])) .< Second(1)), spec[:time])
-ii_6spect = map(j->j-2:j, ii) |> collect
+#select indexes ii from cln[:time] within the span of spec[:time];
+using Dates
+ii = filter(i-> spec[:time][1] ≤ i ≤ spec[:time][end], cln[:time]);
+# select the spec[:time] corresponding to exact cln[:time] values:
+thr_ts = minimum(diff(spec[:time]));
+
+idx_ts = map(x->findfirst((abs.(x .- spec[:time])) .< thr_ts), ii);
+
+# The spectrum time corresponding to cloudnet is then spec[:time][idx_ts]
+
+# The 6 latest spectrum for every time stamp are:
+ii_6spect = map(j -> range(j<5 ? 1 : j-5, length=6), idx_ts)
+
+# The 6 spectra for the time stamp are retrieved as:
+idx_hgt = 100;  # this is the height index
+idx_tit = 20;
+# iteration over i the 6 spectra correspondint to spec[:time][idx_ts]:
+#tmp = findall(spec[:spect_mask][idx_hgt, ii_6spect[i]] .≥ 0);
+idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][idx_hgt, ii_6spect[idx_tit]]);
 
 ## TRYING with PyCall
 using PyCall, Dates
