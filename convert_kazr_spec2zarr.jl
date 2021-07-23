@@ -6,7 +6,7 @@ include(joinpath(homedir(), "LIM/repos/CloudnetTools.jl/src/CloudnetTools.jl"))
 
 # Defining constants:
 ARM_SITE = "utqiagvik-nsa"
-PATH = joinpath(homedir(), "LIM/remsens", ARM_SITE)
+PATH = joinpath(homedir(), "LIM/data", ARM_SITE)
 RADARPRO = "KAZR/ARSCL"
 SPECTPRO = "KAZR/SPECCOPOL"
 CLNET = joinpath(homedir(), "LIM/data/CloudNet/output")
@@ -42,7 +42,7 @@ idx_ts = map(x->findfirst((abs.(x .- spec[:time])) .< thr_ts), ii);
 # The spectrum time corresponding to cloudnet is then spec[:time][idx_ts]
 
 # The 6 latest spectrum for every time stamp are:
-ii_6spect = map(j -> range(j<5 ? 1 : j-5, length=6), idx_ts)
+ii_6spect = map(j -> range(j<5 ? 1 : j-5, length=6), idx_ts);
 
 # The 6 spectra for the time stamp are retrieved as:
 idx_hgt = 100;  # this is the height index
@@ -51,31 +51,83 @@ idx_tit = 20;
 #tmp = findall(spec[:spect_mask][idx_hgt, ii_6spect[i]] .≥ 0);
 idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][idx_hgt, ii_6spect[idx_tit]]);
 
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Creating Matrix for Voodoo:
+# * feature[nsamples, nvelocity, nchannel, npol]
+# * tagets[nsamples, nvelocity, nchannel, npol]
+# * masked[ts, rg]
+#
+n_rg,_ = 292; #size(cln[:Z])
+n_ts = length(idx_ts);
+masked = Array{Bool}(undef, n_rg, n_ts) .= false;
+
+# filling masked array with (true/false) values:
+@. masked[!isnan(cln[:Z][1:n_rg, idx_ts])] = true;
+
+# filling the features array with spectrum data:
+n_samples = sum(masked);
+n_velocity = length(spec[:vel_nn]);
+n_channels = 6;
+n_pol = 2;
+features = Array{Float32}(undef, n_samples, n_velocity, n_channels, n_pol) .= NaN32;
+
+i_sample = 0;
+for i_rg ∈ (1:n_rg)
+    for i_ts ∈ (1:n_ts)
+        if masked[i_rg, i_ts]
+            global i_sample += 1
+            idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][3+i_rg, ii_6spect[i_ts]])
+            n_alt = length(idx_alt)
+            features[i_sample, :, 1:n_alt, 1] = spec[:η_hh][:, idx_alt];
+        end
+    end
+end
+
+# Estimating time variables:
+dt = Dates.value.(ii .- ii[1]);
+
 ## TRYING with PyCall
 using PyCall, Dates
 xr = pyimport("xarray")
 da = pyimport("dask.array")
 
+## Converting Julia variables to dask:
+FeaturesArray = da.from_array(features, chunks=(2965, 64, 2, 1));
+MaskedArray = da.from_array(masked, chunks=(n_rg, n_ts));
+MultiTargets = da.from_array(Array{Float32}(undef, n_samples, n_channels), chunks=(n_channels, 5930))
+TargetsVec = da.from_array(Array{Int32}(undef, n_samples), chunks=(1));
+
 ## *** To fill data with KAZR SPEC ****
 # For coordinates:
+#    (dt) int64 0 29999542 59999085 ...
+#   (nbits) int64 0 1 2 3 4 5
+# (nchannels) int64 0 1 2 3 4 5
+#      (npol) int64 0 1
+#  (nsamples) int64 0 1 2 3 4 5 ... 11855 11856 11857 11858 11859
+#  (nvelocity) int64 0 1 2 3 4 5 6 ... 250 251 252 253 254 255
+#    (rg) float32 119.247086 149.05884 ... 11924.608 11964.357
 my_coor = Dict(
-    :dt => dt, #    (dt) int64 0 29999542 59999085 ... 
-    :nbits => collect(Int64, 0:5), #   (nbits) int64 0 1 2 3 4 5
-    :nchannels => collect(Int64, 0:5), # (nchannels) int64 0 1 2 3 4 5
-    :npol => collect(Int64, 0:1), #      (npol) int64 0 1
-    :nsamples => collect(Int64, range(0, stop=nsam-1)),  #  (nsamples) int64 0 1 2 3 4 5 ... 11855 11856 11857 11858 11859
-    :nvelocity => collect(Int64, range(0, stop=nvel-1)), #  (nvelocity) int64 0 1 2 3 4 5 6 ... 250 251 252 253 254 255
-    :rg => spec[:height], #    (rg) float32 119.247086 149.05884 ... 11924.608 11964.357
-    :ts => spec[:time],
+    :dt => dt,
+    :nbits => collect(Int64, 0:5),
+    :nchannels => collect(Int64, 0:5),
+    :npol => collect(Int64, 0:1),
+    :nsamples => collect(Int64, range(0, stop=n_samples-1)),
+    :nvelocity => collect(Int64, range(0, stop=n_velocity-1)),
+    :rg => spec[:height][3:3+n_rg-1],
+    :ts => spec[:time][idx_ts],
 );
 
 # For Variables:
+#    (nsamples, nvelocity, nchannels, npol) float32 dask.array<shape=(11860, 256, 6, 2), chunksize=(2965, 64, 2, 1)>
+# bool dask.array<shape=(120, 292), chunksize=(120, 292)>
+# float32 dask.array<shape=(11860, 6), chunksize=(5930, 6)>
 my_vars = Dict(
-    :features => ([:nsamples, :nvelocity, :nchannels, :npol], FeaturesArray), #    (nsamples, nvelocity, nchannels, npol) float32 dask.array<shape=(11860, 256, 6, 2), chunksize=(2965, 64, 2, 1)>
-    :masked => ([:ts, :rg], MastekArray), # bool dask.array<shape=(120, 292), chunksize=(120, 292)>
-    :multitargets => ([:nsamples, :nbits], MultiTargets), # float32 dask.array<shape=(11860, 6), chunksize=(5930, 6)>
-    :targets => (:nsamples, TargetsVec),
+    :features => ([:nsamples, :nvelocity, :nchannels, :npol], FeaturesArray),
+    :masked => ([:rg, :ts], MaskedArray),
 );
+#:multitargets => ([:nbits, :nsamples], MultiTargets),
+#    :targets => (:nsamples, TargetsVec),
+#);
 
 # For Attributes:
 my_att = Dict(
@@ -99,12 +151,13 @@ VariableND = xr.Dataset(
     attrs = my_att,
 );
 
+filename_zarr = "data/kazrspec.zarr";
+VariableND.to_zarr(store=filename_zarr)
+
+
 # ØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØ
 # the following doesn't work!!
 # Storing as Zarr
-VariablesND.to_zarr(store=filename_zarr)
-
-p = "data/kazrspec.zarr";
 
 Z = zcreate(eltype(spec[:spect_mask]), nt, nh, path=p, name="spec_mask");
 
