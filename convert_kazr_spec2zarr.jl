@@ -15,7 +15,7 @@ CLNET = joinpath(homedir(), "LIM/data/CloudNet/output")
 yy = 2019;
 mm = 1;
 dd = 27;
-hh = 03;
+hh = 06;
 
 # reading CloudNet categorize data file:
 clnfile = ARMtools.getFilePattern(CLNET, "CEIL10m", yy, mm, dd; submonth=true)
@@ -28,7 +28,6 @@ cln = CloudNet.readCLNFile(clnfile);
 # reading Spectrum Data
 spfile = ARMtools.getFilePattern(PATH, SPECTPRO, yy, mm, dd; hh)
 spec = ARMtools.readSPECCOPOL(spfile);
-nt, nh = size(spec[:spect_mask]);
 
 ## MATCHING the CloudNet time vector with the Spectrum time vector:
 #select indexes ii from cln[:time] within the span of spec[:time];
@@ -45,11 +44,10 @@ idx_ts = map(x->findfirst((abs.(x .- spec[:time])) .< thr_ts), ii);
 ii_6spect = map(j -> range(j<5 ? 1 : j-5, length=6), idx_ts);
 
 # The 6 spectra for the time stamp are retrieved as:
-idx_hgt = 100;  # this is the height index
-idx_tit = 20;
+# > idx_hgt = 100;  # this is the height index
+# > idx_tit = 20;
 # iteration over i the 6 spectra correspondint to spec[:time][idx_ts]:
-#tmp = findall(spec[:spect_mask][idx_hgt, ii_6spect[i]] .≥ 0);
-idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][idx_hgt, ii_6spect[idx_tit]]);
+# > idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][idx_hgt, ii_6spect[idx_tit]]);
 
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Creating Matrix for Voodoo:
@@ -57,7 +55,7 @@ idx_alt = 1 .+ filter(x->x ≥ 0, spec[:spect_mask][idx_hgt, ii_6spect[idx_tit]]
 # * tagets[nsamples, nvelocity, nchannel, npol]
 # * masked[ts, rg]
 #
-n_rg,_ = 292; #size(cln[:Z])
+n_rg = 292; # n_rg,_ = size(cln[:Z])
 n_ts = length(idx_ts);
 masked = Array{Bool}(undef, n_rg, n_ts) .= false;
 
@@ -87,15 +85,19 @@ end
 dt = Dates.value.(ii .- ii[1]);
 
 ## TRYING with PyCall
-using PyCall, Dates
+using PyCall
 xr = pyimport("xarray")
 da = pyimport("dask.array")
 
 ## Converting Julia variables to dask:
-FeaturesArray = da.from_array(features, chunks=(2965, 64, 2, 1));
+FeaturesArray = da.from_array(features,
+                              chunks = (floor(n_samples/4),
+                                        floor(n_velocity/4),
+                                        2, 1));
 MaskedArray = da.from_array(masked, chunks=(n_rg, n_ts));
-MultiTargets = da.from_array(Array{Float32}(undef, n_samples, n_channels), chunks=(n_channels, 5930))
-TargetsVec = da.from_array(Array{Int32}(undef, n_samples), chunks=(1));
+MultiTargets = da.from_array(Array{Float32}(undef, n_samples, n_channels),
+                             chunks = (floor(n_samples/2), n_channels))
+TargetsVec = da.from_array(Array{Int32}(undef, n_samples), chunks=(n_samples));
 
 ## *** To fill data with KAZR SPEC ****
 # For coordinates:
@@ -118,16 +120,15 @@ my_coor = Dict(
 );
 
 # For Variables:
-#    (nsamples, nvelocity, nchannels, npol) float32 dask.array<shape=(11860, 256, 6, 2), chunksize=(2965, 64, 2, 1)>
+# (nsamples, nvelocity, nchannels, npol) float32 dask.array<shape=(11860, 256, 6, 2), chunksize=(2965, 64, 2, 1)>
 # bool dask.array<shape=(120, 292), chunksize=(120, 292)>
 # float32 dask.array<shape=(11860, 6), chunksize=(5930, 6)>
 my_vars = Dict(
     :features => ([:nsamples, :nvelocity, :nchannels, :npol], FeaturesArray),
     :masked => ([:rg, :ts], MaskedArray),
+    :multitargets => ([:nsamples, :nbits], MultiTargets),
+    :targets => (:nsamples, TargetsVec),
 );
-#:multitargets => ([:nbits, :nsamples], MultiTargets),
-#    :targets => (:nsamples, TargetsVec),
-#);
 
 # For Attributes:
 my_att = Dict(
