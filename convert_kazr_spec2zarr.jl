@@ -33,6 +33,7 @@ spec = ARMtools.readSPECCOPOL(spfile);
 #select indexes ii from cln[:time] within the span of spec[:time];
 using Dates
 ii = filter(i-> spec[:time][1] ≤ i ≤ spec[:time][end], cln[:time]);
+
 # select the spec[:time] corresponding to exact cln[:time] values:
 thr_ts = minimum(diff(spec[:time]));
 
@@ -90,6 +91,7 @@ xr = pyimport("xarray")
 da = pyimport("dask.array")
 
 ## Converting Julia variables to dask:
+## ***** For N-D variales ***********
 FeaturesArray = da.from_array(features,
                               chunks = (floor(n_samples/4),
                                         floor(n_velocity/4),
@@ -145,15 +147,102 @@ my_att = Dict(
     :ts_unit_long  => "Unix time, seconds since Jan 1. 1979",
 );
 
-# Creating XARRAY Dataset:
+# Creating N-D XARRAY Dataset:
 VariableND = xr.Dataset(
     data_vars = my_vars,
     coords = my_coor,
     attrs = my_att,
 );
 
-filename_zarr = "data/kazrspec.zarr";
+
+using Printf
+filename_zarr = @sprintf("data/%04d%02d%02d_%s-%s_nsa-CLOUDNETpy-ND.zarr",
+                         yy, mm, dd,
+                         Dates.format(spec[:time][1],"HHMM"),
+                         Dates.format(spec[:time][end], "HHMM"))
+
 VariableND.to_zarr(store=filename_zarr)
+
+
+# **** For 2-D variables:
+info2D_coor = Dict(
+    :dt => dt,
+    :rg => spec[:height][3:3+n_rg-1],
+    :ts => cln[:time][idx_ts],
+);
+
+# For 2-D dask variables:
+info2D_vars = Dict(
+    # Int32
+    :CLASS => ([:rg, :ts], da.from_array(cln[:CLASSIFY][1:n_rg, idx_ts],
+                                         chunks = (n_rg, n_ts) )),
+
+    :LWP => (:ts, da.from_array(cln[:LWP][idx_ts], chunks = (n_ts) )),
+
+    #:P => ([:rg, :ts], da.from_array(cln[:Pa][1:n_rg, idx_ts],
+    #                                 chunks = (n_rg, floor(n_ts/2)) )),
+
+    #:T => ([:rg, :ts], da.from_array(cln[:T][1:n_rg, idx_ts],
+    #                                 chunks = (n_rg, floor(n_ts/2)) )),
+
+    #:Tw=> ([:rg, :ts], da.from_array(cln[:Tw][1:n_rg, idx_ts],
+    #                                 chunks = (n_rg, n_ts) )),
+
+    #:UWIND=> ([:rg, :ts], da.from_array(cln[:UWIND][1:n_rg, idx_ts],
+    #                                chunks = (n_rg, floor(n_ts/2)) )),
+
+    :VEL  => ([:rg, :ts], da.from_array(cln[:V][1:n_rg, idx_ts],
+                                        chunks = (n_rg, n_ts) )),
+
+    :VEL_sigma => ([:rg, :ts], da.from_array(cln[:σV][1:n_rg, idx_ts],
+                                             chunks = (n_rg, n_ts) )),
+
+    #:VWIND => ([:rg, :ts], da.from_array(cln[:VWIND][1:n_rg, idx_ts],
+    #                                     chunks=(n_rg, floor(n_ts/2)) )),
+
+    :Z     => ([:rg, :ts], da.from_array(cln[:Z][1:n_rg, idx_ts],
+                                         chunks=(n_rg, n_ts) )),
+                                     
+    :beta  => ([:rg, :ts], da.from_array(cln[:β][1:n_rg, idx_ts],
+                                         chunks = (n_rg, n_ts) )),
+
+    :category_bits => ([:rg, :ts], da.from_array(cln[:CATEBITS][1:n_rg, idx_ts],
+                                                 chunks = (n_rg, n_ts) )),
+    # Int32
+    :detection_status => ([:rg, :ts], da.from_array(cln[:DETECTST][1:n_rg, idx_ts],
+                                                    chunks = (n_rg, n_ts) )),
+    # Float32
+    :insect_prob => ([:rg, :ts], da.from_array(cln[:P_INSECT][1:n_rg, idx_ts],
+                                               chunks = (n_rg, n_ts) )),
+    
+    #:q => ([:rg, :ts], da.from_array(cln[:Qv][1:n_rg, idx_ts],
+    #                                 chunks = (n_rg, floor(n_ts/2)) )),
+    
+    :quality_bits => ([:rg, :ts], da.from_array(cln[:QUBITS][1:n_rg, idx_ts],
+                                                chunks = (n_rg, n_ts) )),
+    
+    :width => ([:rg, :ts], da.from_array(cln[:ωV][1:n_rg, idx_ts],
+                                         chunks = (n_rg, n_ts) )),
+);
+
+# For attributes 2-D variables
+info2D_attr = Dict(
+    :dt_unit       => "date",
+    :dt_unit_long  => "Datetime format",
+    :rg_unit       => "m",
+    :rg_unit_long  => "Meter",
+    :ts_unit       => "sec",
+    :ts_unit_long  => "Unix time, seconds since Jan 1. 1979",
+);
+
+# Creating 2-D XARRAY Dataset:
+Variable2D = xr.Dataset(
+    data_vars = info2D_vars,
+    coords = info2D_coor,
+    attrs = info2D_attr,
+);
+
+Variable2D.to_zarr(store = replace(filename_zarr, "ND" => "2D" ))
 
 
 # ØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØØ
