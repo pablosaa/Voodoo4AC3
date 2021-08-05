@@ -19,7 +19,7 @@ hh = 06;
 
 # reading CloudNet categorize data file:
 clnfile = ARMtools.getFilePattern(CLNET, "CEIL10m", yy, mm, dd; submonth=true)
-cln = CloudNet.readCLNFile(clnfile);
+cln = CloudNet.readCLNFile(clnfile, modelreso=true);
 
 # reading Radar Data
 #rafile = ARMtools.getFilePattern(PATH, RADARPRO, yy, mm, dd)
@@ -32,12 +32,12 @@ spec = ARMtools.readSPECCOPOL(spfile);
 ## MATCHING the CloudNet time vector with the Spectrum time vector:
 #select indexes ii from cln[:time] within the span of spec[:time];
 using Dates
-ii = filter(i-> spec[:time][1] ≤ i ≤ spec[:time][end], cln[:time]);
+ii = filter(i -> spec[:time][1] ≤ i ≤ spec[:time][end], cln[:time]);
 
 # select the spec[:time] corresponding to exact cln[:time] values:
 thr_ts = minimum(diff(spec[:time]));
 
-idx_ts = map(x->findfirst((abs.(x .- spec[:time])) .< thr_ts), ii);
+idx_ts = map(x -> findfirst((abs.(x .- spec[:time])) .< thr_ts), ii);
 
 # The spectrum time corresponding to cloudnet is then spec[:time][idx_ts]
 
@@ -70,7 +70,6 @@ n_channels = 6;
 n_pol = 2;
 
 # Creating features tensor:
-#features = Array{Float32}(undef, n_samples, n_velocity, n_channels, n_pol) .= NaN32;
 features = Array{Float32}(undef, n_pol, n_channels, n_velocity, n_samples) .= NaN32;
 η_hh = CloudNet.TransformZeroOne(spec[:η_hh]);
 
@@ -216,24 +215,26 @@ info2D_vars = Dict(
     
     :width => ([:ts, :rg], da.from_array(transpose(cln[:ωV][1:n_rg, idx_ts]),
                                          chunks = (n_ts, n_rg) )),
-);
 
-    #:P => ([:rg, :ts], da.from_array(cln[:Pa][1:n_rg, idx_ts],
-    #                                 chunks = (n_rg, floor(n_ts/2)) )),
 
-    #:T => ([:rg, :ts], da.from_array(cln[:T][1:n_rg, idx_ts],
-    #                                 chunks = (n_rg, floor(n_ts/2)) )),
+    :P => ([:rg, :ts], da.from_array(cln[:Pa][1:n_rg, idx_ts],
+                                     chunks = (n_rg, floor(n_ts/2)) )),
 
-    #:Tw=> ([:rg, :ts], da.from_array(cln[:Tw][1:n_rg, idx_ts],
-    #                                 chunks = (n_rg, n_ts) )),
-
-    #:UWIND=> ([:rg, :ts], da.from_array(cln[:UWIND][1:n_rg, idx_ts],
-    #                                chunks = (n_rg, floor(n_ts/2)) )),
-    #:VWIND => ([:rg, :ts], da.from_array(cln[:VWIND][1:n_rg, idx_ts],
-    #                                     chunks=(n_rg, floor(n_ts/2)) )),
-    #:q => ([:rg, :ts], da.from_array(cln[:Qv][1:n_rg, idx_ts],
-    #                                 chunks = (n_rg, floor(n_ts/2)) )),
+    :T => ([:rg, :ts], da.from_array(cln[:T][1:n_rg, idx_ts],
+                                     chunks = (n_rg, floor(n_ts/2)) )),
     
+    :Tw => ([:rg, :ts], da.from_array(cln[:Tw][1:n_rg, idx_ts],
+                                     chunks = (n_rg, n_ts) )),
+    
+    :UWIND => ([:rg, :ts], da.from_array(cln[:UWIND][1:n_rg, idx_ts],
+                                    chunks = (n_rg, floor(n_ts/2)) )),
+
+    :VWIND => ([:rg, :ts], da.from_array(cln[:VWIND][1:n_rg, idx_ts],
+                                         chunks=(n_rg, floor(n_ts/2)) )),
+
+    :q => ([:rg, :ts], da.from_array(cln[:QV][1:n_rg, idx_ts],
+                                     chunks = (n_rg, floor(n_ts/2)) )),
+);
 
 
 # For attributes 2-D variables
