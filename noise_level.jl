@@ -13,6 +13,16 @@ macro bind(def, element)
     end
 end
 
+# ╔═╡ d758115c-c216-4900-a9d1-393851b5af7a
+#begin
+	#import Pkg
+#	#Pkg.activate(mktempdir())
+	#Pkg.add(path=joinpath(homedir(), "LIM/repos/ARMtools.jl"))
+	#Pkg.dev(ARMtools)
+	#import ARMtools
+#end
+using ARMtools
+
 # ╔═╡ fb5569e0-e35c-44ba-82a0-b31a9d99103e
 using Plots
 
@@ -22,22 +32,13 @@ using PlutoUI
 # ╔═╡ f329f96b-b09c-4568-b86e-be145e338bfc
 using Statistics
 
-# ╔═╡ d758115c-c216-4900-a9d1-393851b5af7a
-#begin
-#	import Pkg
-#	#Pkg.activate(mktempdir())
-#	Pkg.add(path = joinpath(homedir(), "LIM/repos/ARMtools.jl"))
-#	using ARMtools
-#end
-include(joinpath(homedir(), "LIM/repos/ARMtools.jl/src/ARMtools.jl"))
-
 # ╔═╡ 32adbc2c-0472-11ec-087f-331c556a12c5
 md"""
 # Spectra Noise Level
 """
 
 # ╔═╡ 9fb8fbce-0637-42d9-87b8-ee00bfe93b2c
-spec_file="/home/pablo/LIM/remsens/utqiagvik-nsa/KAZR/SPECCOPOL/2019/nsakazrspeccmaskgecopolC1.a0.20190126.100004.cdf";
+spec_file="/home/pablo/LIM/data/utqiagvik-nsa/KAZR/SPECCOPOL/2019/nsakazrspeccmaskgecopolC1.a0.20190126.100004.cdf";
 
 # ╔═╡ 9a57a2d2-3c2e-421f-99a2-fc474cb21e12
 spec=ARMtools.readSPECCOPOL(spec_file);
@@ -82,6 +83,7 @@ end
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+ARMtools = "04fa4220-f7a9-42e2-a909-1083f698c312"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
@@ -94,6 +96,14 @@ PlutoUI = "~0.7.9"
 # ╔═╡ 00000000-0000-0000-0000-000000000002
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
+
+[[ARMtools]]
+deps = ["NCDatasets", "Printf", "Statistics", "Test"]
+git-tree-sha1 = "144c367291fefccb359da79ea5e70a105c1308b0"
+repo-rev = "main"
+repo-url = "/home/pablo/LIM/repos/ARMtools.jl"
+uuid = "04fa4220-f7a9-42e2-a909-1083f698c312"
+version = "0.1.0"
 
 [[Adapt]]
 deps = ["LinearAlgebra"]
@@ -115,6 +125,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "c3598e525718abcc440f69cc6d5f60dda0a1b61e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.6+5"
+
+[[CFTime]]
+deps = ["Dates", "Printf"]
+git-tree-sha1 = "bca6cb6ee746e6485ca4535f6cc29cf3579a0f20"
+uuid = "179af706-886a-5703-950a-314cd64e0468"
+version = "0.1.1"
 
 [[Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Pkg", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
@@ -282,6 +298,12 @@ version = "2.68.3+0"
 git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
+
+[[HDF5_jll]]
+deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "OpenSSL_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "fd83fa0bde42e01952757f01149dd968c06c4dba"
+uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
+version = "1.12.0+1"
 
 [[HTTP]]
 deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
@@ -467,10 +489,22 @@ uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 [[MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 
+[[NCDatasets]]
+deps = ["CFTime", "DataStructures", "Dates", "NetCDF_jll", "Printf"]
+git-tree-sha1 = "5da406d9624f25909a6f556bd8d5c1deaa189ee6"
+uuid = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+version = "0.11.7"
+
 [[NaNMath]]
 git-tree-sha1 = "bfe47e760d60b82b66b61d2d44128b62e3a369fb"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "0.3.5"
+
+[[NetCDF_jll]]
+deps = ["Artifacts", "HDF5_jll", "JLLWrappers", "LibCURL_jll", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Pkg", "Zlib_jll", "nghttp2_jll"]
+git-tree-sha1 = "0cf4d1bf2ef45156aed85c9ac5f8c7e697d9288c"
+uuid = "7243133f-43d8-5620-bbf4-c2c921802cf3"
+version = "400.702.400+0"
 
 [[NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
@@ -580,9 +614,9 @@ uuid = "01d81517-befc-4cb6-b9ec-a95719d0359c"
 version = "0.3.4"
 
 [[Reexport]]
-git-tree-sha1 = "22a05aff275f6704f8769799beafe47ee7d14416"
+git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
-version = "1.2.1"
+version = "1.2.2"
 
 [[Requires]]
 deps = ["UUIDs"]

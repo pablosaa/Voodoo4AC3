@@ -1,0 +1,3 @@
+[submodule "Voodoo"]
+	path = Voodoo
+	url = git@github.com:KarlJohnsonnn/Voodoo.git
