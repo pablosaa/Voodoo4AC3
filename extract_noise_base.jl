@@ -23,22 +23,27 @@ tmp = findfirst(isapprox.(spec[:height][idx_alt], i_hgt, atol=15.0));
 # index corresponding to height i_hgt [m]
 idx_hgt = 1 .+ spec[:spect_mask][idx_alt[tmp], i];
 
-η = spec[:η_hh][:, idx_hgt]
-minmax_peak = extrema(η)
-mean_peak = mean(η)
+using ImageFiltering
+ker = ImageFiltering.Kernel.gaussian((3,))
 
-std_peak = std(η) + mean_peak
+function extract_NL(η, ts, hg, ker)
+#η = spec[:η_hh][:, idx_hgt]
+    minmax_peak = extrema(η)
+    mean_peak = mean(η)
+
+    std_peak = std(η) + mean_peak
+
+# smoothing the noise base:
+
+    new_η = imfilter(η, ker)
+    new_η[η .> std_peak] = η[η .> std_peak]
+    return new_η
+end
+
 p1 = plot(spec[:vel_nn],  η, title="$i_hgt [m] at $(spec[:time][i])", ylim=minmax_peak);
 plot!(spec[:vel_nn][[1, end]], repeat([mean_peak],2))
 plot!(spec[:vel_nn][[1, end]], repeat([std_peak],2))
 
-# smoothing the noise base:
-using ImageFiltering
-ker = ImageFiltering.Kernel.gaussian((3,))
-
-new_η = imfilter(η, ker)
-new_η[η .> std_peak] = η[η .> std_peak]
 p2 = plot(spec[:vel_nn],  new_η, laber="filter", ylim=minmax_peak);
-
 plot(p1, p2, layout=(1,2))
 # end of script
