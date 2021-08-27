@@ -13,6 +13,19 @@ macro bind(def, element)
     end
 end
 
+# ╔═╡ d758115c-c216-4900-a9d1-393851b5af7a
+#begin
+	#import Pkg
+#	#Pkg.activate(mktempdir())
+	#Pkg.add(path=joinpath(homedir(), "LIM/repos/ARMtools.jl"))
+	#Pkg.dev(ARMtools)
+	#import ARMtools
+#end
+begin
+	using ARMtools
+	using Printf
+end
+
 # ╔═╡ fb5569e0-e35c-44ba-82a0-b31a9d99103e
 using Plots
 
@@ -23,7 +36,7 @@ using PlutoUI
 begin
 	using Statistics
 	using ImageFiltering
-	ker = ImageFiltering.Kernel.gaussian((7,))
+	ker = ImageFiltering.Kernel.gaussian((2,))
 end
 
 # ╔═╡ 32adbc2c-0472-11ec-087f-331c556a12c5
@@ -31,22 +44,11 @@ md"""
 # Spectra Noise Level
 """
 
-# ╔═╡ d758115c-c216-4900-a9d1-393851b5af7a
-#begin
-	#import Pkg
-#	#Pkg.activate(mktempdir())
-	#Pkg.add(path=joinpath(homedir(), "LIM/repos/ARMtools.jl"))
-	#Pkg.dev(ARMtools)
-	#import ARMtools
-#end
-using ARMtools
-using Printf
-
 # ╔═╡ 79a74f3f-99ea-4020-9c17-d5232360d40d
 dd = 26; mm = 01; yy = 2019;
 
-# ╔═╡ 9fb8fbce-0637-42d9-87b8-ee00bfe93b2c
-spec_file=joinpath(homedir(), @sprintf("LIM/remsens/utqiagvik-nsa/KAZR/SPECCOPOL/%04d/nsakazrspeccmaskgecopolC1.a0.%04d%02d%02d.100004.cdf", yy,yy,mm,dd))
+# ╔═╡ 2630444a-5a45-4ff5-8afd-5b3750ddbf83
+spec_file = ARMtools.getFilePattern(joinpath(homedir(), "LIM/remsens/utqiagvik-nsa/KAZR/"), "SPECCOPOL", yy, mm, dd, hh=10)
 
 # ╔═╡ c2d56e13-a76d-479e-84d5-a55ca0f38a00
 isfile(spec_file)
@@ -61,24 +63,30 @@ md"""
 
 # ╔═╡ 36a55803-29c3-4b86-8d78-78d67b2ee168
 begin 
-	i = 291
+	i = 191
 	idx_alt = findall(spec[:spect_mask][:,i] .≥ 0);
 	idx= 1 .+ spec[:spect_mask][idx_alt, i];
 end
 
-# ╔═╡ d73a1172-d3da-456f-821b-56159e62a9b6
-Plots.plot(spec[:vel_nn], spec[:height][idx_alt], spec[:η_hh][:,idx]',st=:heatmap, color=:berlin, title="$(spec[:time][i])")
-
 # ╔═╡ 4650239c-6898-4805-951f-755afe1a11a4
 @bind i_hgt Slider(80:30:4000; default=160,show_value=true) # m
+
+# ╔═╡ d73a1172-d3da-456f-821b-56159e62a9b6
+begin
+	Plots.plot(spec[:vel_nn], spec[:height][idx_alt], spec[:η_hh][:,idx]',st=:heatmap, color=:berlin, title="$(spec[:time][i])")
+	Plots.plot!(spec[:vel_nn][[1, end]], repeat([i_hgt],2), c=:yellow)
+end
 
 # ╔═╡ 0b53165a-0c71-4db5-b81d-e15c265ae391
 begin
 	# for specific Altitude and time span:	
-	tmp = findfirst(isapprox.(spec[:height][idx_alt], i_hgt, atol=9.9));
+	tmp = findfirst(isapprox.(spec[:height][idx_alt], i_hgt, atol=14.9));
 	# index corresponding to height i_hgt [m]
 	idx_hgt = 1 .+ spec[:spect_mask][idx_alt[tmp], i];
 end
+
+# ╔═╡ e76065db-4e99-4e74-8121-5e676ce41439
+spec[:height][idx_alt[tmp]] |> round
 
 # ╔═╡ b5d2f039-dcfb-4ce7-970f-41b42e8db95e
 function extract_NL(η::Vector, ker)
@@ -86,7 +94,8 @@ function extract_NL(η::Vector, ker)
     mean_peak = mean(η)
 
     std_peak = std(η) + mean_peak
-
+	# finding all peaks:
+	idx_peaks = findall(η .≥ mean_peak)
 # smoothing the noise base:
 
     new_η = imfilter(η, ker)
@@ -98,48 +107,73 @@ end
 # ╔═╡ 57bec460-08f2-467c-b043-8f60d90e119a
 begin
 	η = spec[:η_hh][:, idx_hgt]
-	#max_peak = maximum(η)
-	mean_peak = mean(η)
-	std_peak = 2std(η) + mean_peak
+	(max_peak, idx_max) = findmax(η) #maximum(η)
+	mean_peak = extrema(η) |> sum #max_peak - 3#dB #mean(η)
+	std_peak = 0.5mean_peak #2std(η) + mean_peak
 	η₁ = extract_NL(η, ker)
-	plot(spec[:vel_nn],  η, title="$i_hgt [m] at $(spec[:time][i])", label="raw");
-	plot!(spec[:vel_nn], η₁, label="filtered")
-	plot!(spec[:vel_nn][[1, end]], repeat([std_peak],2), label="threshold")
-	idx_width = findall(η .≥ std_peak) |> extrema |> collect
-	#idx_width += [-1, 1]
-	while η[idx_width[1]] > η[idx_width[1]-1] || η[idx_width[2]] > η[idx_width[2]+1]
+	
+	if abs(std_peak-max_peak) <4
+		idx_width = findall(η .≥ std_peak) |> extrema |> collect
+	else
+		idx_width = repeat([findmax(η₁)[2]],2) #
+	end
+	
+	while η₁[idx_width[1]] > η₁[idx_width[1]-1] || η₁[idx_width[2]] > η₁[idx_width[2]+1]
 		idx_width[1] -=1
 		idx_width[2] +=1
 	end
 	
+	ii=vcat(1:idx_width[1], idx_width[2]:length(η))
+	
+	NoiseMean = mean(η[ii])	
+	NoisePeak = maximum(η[ii])
+	NoiseStdv = std(η[ii])
+	
+	η₁[ii] .= NoiseMean
+	
+	plot(spec[:vel_nn],  η, title="$i_hgt [m] at $(spec[:time][i])", label="raw");
+	plot!(spec[:vel_nn], η₁, label="filtered")
+	plot!(spec[:vel_nn][[1, end]], repeat([std_peak],2), label="mean Spc")
+	plot!(spec[:vel_nn][[1, end]], repeat([NoisePeak],2), label="Noise Peak")
+	plot!(spec[:vel_nn][[1, end]], repeat([NoiseMean],2), label="Noise Mean")
 	scatter!(spec[:vel_nn][idx_width], η[idx_width], m=:c)
 end
 
-# ╔═╡ 2911d86e-4cff-4e84-aceb-09b03db2084c
-ii=vcat(1:idx_width[1], idx_width[2]:256)
+# ╔═╡ 4e203500-3d2e-467e-8f3b-80765d5e1c34
+diff(η[idx_width])[1] |> abs < 1
 
 # ╔═╡ 0bd6de92-6320-46f9-9e29-8a6a53ef7522
 SNR =η.-mean(η[ii])
 
 # ╔═╡ 83e9b929-7647-4256-b889-e21ee3553579
-function ∫dB(η::Vector)
-	tmp = 10.0.^(0.1η)
-	tmp = sum(tmp)
+function ∫dη(η::Vector, η₀::Int64, η₁::Int64)
+	tmp = 10.0.^(0.1η[η₀:η₁]) |> sum
 	return 10.0*log10(tmp)
 end
 
 # ╔═╡ a3dac80d-0223-4e3e-8262-5a1b83b8a9a1
 begin
-	p1=plot(spec[:vel_nn], η);
-	plot!(spec[:vel_nn][SNR.≥2], η[SNR.≥2]);
+	snr_thr = 2.5
+	p1=plot(spec[:vel_nn], η₁);
+	plot!(spec[:vel_nn][SNR.≥snr_thr], η₁[SNR.≥snr_thr]);
 	p2=plot(spec[:vel_nn], SNR);
 	
-	plot(p1,p2,layout=(2,1), title="$(∫dB(η[SNR.≥2]))")
+	plot(p1,p2,layout=(2,1), title="Z = $(∫dη(η, idx_width[1], idx_width[2]))")
 end
+
+# ╔═╡ a61bf964-1842-4cfc-a52b-acc048c1257c
+spec[:vel_nn][round(Int32,0.5length(spec[:vel_nn]))+1]
+
+# ╔═╡ 98dd7f08-9069-4ace-b8ee-86d2429d319c
+extrema(spec[:vel_nn])
+
+# ╔═╡ c6361ba2-d0df-4b0a-a06b-58241ff52913
+diff(spec[:vel_nn])
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+ARMtools = "04fa4220-f7a9-42e2-a909-1083f698c312"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
@@ -155,6 +189,14 @@ PlutoUI = "~0.7.9"
 # ╔═╡ 00000000-0000-0000-0000-000000000002
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
+
+[[ARMtools]]
+deps = ["NCDatasets", "Printf", "Statistics", "Test"]
+git-tree-sha1 = "144c367291fefccb359da79ea5e70a105c1308b0"
+repo-rev = "main"
+repo-url = "git@github.com:pablosaa/ARMtools.jl.git"
+uuid = "04fa4220-f7a9-42e2-a909-1083f698c312"
+version = "0.1.0"
 
 [[AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -182,6 +224,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "c3598e525718abcc440f69cc6d5f60dda0a1b61e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.6+5"
+
+[[CFTime]]
+deps = ["Dates", "Printf"]
+git-tree-sha1 = "bca6cb6ee746e6485ca4535f6cc29cf3579a0f20"
+uuid = "179af706-886a-5703-950a-314cd64e0468"
+version = "0.1.1"
 
 [[Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Pkg", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
@@ -407,6 +455,12 @@ version = "1.1.0"
 git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
+
+[[HDF5_jll]]
+deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "OpenSSL_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "fd83fa0bde42e01952757f01149dd968c06c4dba"
+uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
+version = "1.12.0+1"
 
 [[HTTP]]
 deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
@@ -642,10 +696,22 @@ version = "0.3.3"
 [[MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 
+[[NCDatasets]]
+deps = ["CFTime", "DataStructures", "Dates", "NetCDF_jll", "Printf"]
+git-tree-sha1 = "5da406d9624f25909a6f556bd8d5c1deaa189ee6"
+uuid = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+version = "0.11.7"
+
 [[NaNMath]]
 git-tree-sha1 = "bfe47e760d60b82b66b61d2d44128b62e3a369fb"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "0.3.5"
+
+[[NetCDF_jll]]
+deps = ["Artifacts", "HDF5_jll", "JLLWrappers", "LibCURL_jll", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Pkg", "Zlib_jll", "nghttp2_jll"]
+git-tree-sha1 = "0cf4d1bf2ef45156aed85c9ac5f8c7e697d9288c"
+uuid = "7243133f-43d8-5620-bbf4-c2c921802cf3"
+version = "400.702.400+0"
 
 [[NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
@@ -1125,22 +1191,26 @@ version = "0.9.1+5"
 # ╟─32adbc2c-0472-11ec-087f-331c556a12c5
 # ╠═d758115c-c216-4900-a9d1-393851b5af7a
 # ╠═79a74f3f-99ea-4020-9c17-d5232360d40d
-# ╠═9fb8fbce-0637-42d9-87b8-ee00bfe93b2c
+# ╠═2630444a-5a45-4ff5-8afd-5b3750ddbf83
 # ╠═c2d56e13-a76d-479e-84d5-a55ca0f38a00
 # ╠═9a57a2d2-3c2e-421f-99a2-fc474cb21e12
 # ╟─05870c06-167e-4322-8b8c-5cde7beea03d
 # ╠═36a55803-29c3-4b86-8d78-78d67b2ee168
 # ╠═fb5569e0-e35c-44ba-82a0-b31a9d99103e
-# ╠═d73a1172-d3da-456f-821b-56159e62a9b6
 # ╠═b9851d02-cc5d-4a35-90ed-213eea344692
 # ╠═4650239c-6898-4805-951f-755afe1a11a4
+# ╠═d73a1172-d3da-456f-821b-56159e62a9b6
 # ╠═0b53165a-0c71-4db5-b81d-e15c265ae391
+# ╠═e76065db-4e99-4e74-8121-5e676ce41439
 # ╠═f329f96b-b09c-4568-b86e-be145e338bfc
 # ╠═b5d2f039-dcfb-4ce7-970f-41b42e8db95e
 # ╠═57bec460-08f2-467c-b043-8f60d90e119a
-# ╠═2911d86e-4cff-4e84-aceb-09b03db2084c
+# ╠═4e203500-3d2e-467e-8f3b-80765d5e1c34
 # ╠═0bd6de92-6320-46f9-9e29-8a6a53ef7522
 # ╠═83e9b929-7647-4256-b889-e21ee3553579
 # ╠═a3dac80d-0223-4e3e-8262-5a1b83b8a9a1
+# ╠═a61bf964-1842-4cfc-a52b-acc048c1257c
+# ╠═98dd7f08-9069-4ace-b8ee-86d2429d319c
+# ╠═c6361ba2-d0df-4b0a-a06b-58241ff52913
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
