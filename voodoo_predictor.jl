@@ -14,6 +14,9 @@ end
 # ╔═╡ 40bc4a4e-a4d3-4226-a672-ed36cddbb7cf
 using ARMtools
 
+# ╔═╡ b96a49f9-ba9f-4f58-9c45-43dc878861af
+include("adapt_KAZR_data4voodoo.jl")
+
 # ╔═╡ d19215a4-20d0-40ad-a03a-c77ed3f91da9
 torch=pyimport("torch")
 
@@ -65,7 +68,15 @@ model = TM.VoodooNet(Xₜ.shape, NCLASSES; torch_settings...) ;
 model.load_state_dict(torch.load(trained_model, map_location=model.device)["state_dict"])
 
 # ╔═╡ 0050fd35-755b-4ad5-a483-5b81c7fefbb9
+prediction = model.predict(Xₜ, batch_size=256)
 
+# ╔═╡ b66ae1a4-40a3-43cb-b75a-5822c787a316
+prediction.to("cpu").shape
+
+# ╔═╡ 73cc230d-71fa-4ac6-ab9c-046e97977343
+md"""
+### Obtaining KAZR spectrum data & adapting to _Voodoo_ input shape
+"""
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -946,5 +957,8 @@ version = "0.9.1+5"
 # ╠═5d88c349-a3d6-4ee7-844c-67fb2787dca8
 # ╠═d81a98c6-66e9-4e74-b419-c9b2ace9c218
 # ╠═0050fd35-755b-4ad5-a483-5b81c7fefbb9
+# ╠═b66ae1a4-40a3-43cb-b75a-5822c787a316
+# ╟─73cc230d-71fa-4ac6-ab9c-046e97977343
+# ╠═b96a49f9-ba9f-4f58-9c45-43dc878861af
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
