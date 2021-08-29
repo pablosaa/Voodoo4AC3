@@ -32,10 +32,11 @@ TM = pyimport("libVoodoo.TorchModel")
 # ╔═╡ 82e5b299-86bb-4493-b71e-5f15ac8fa2b4
 md"""
 ### defining _Voodoo_ model input parameters:
-* model_setup_file
-* trained_model -> actual torch trained model 
-* p
-* NCLASSES
+* model\_setup\_file : TOML file with model definition
+* trained_model : String with path to trained torch model 
+* p : ???
+* NCLASSES : 
+* torch_settings : TOML Dict containing model settings 
 """
 
 # ╔═╡ 28747c48-9771-489d-b010-d49c8c000270
@@ -45,51 +46,23 @@ begin
 	p = 0.5
 	NCLASSES = 3
 	helper_settings = TOML.parsefile(model_setup_file)["pytorch"]
-	helper_settings["dev"]="cpu";
+	torch_settings = Dict(Symbol(k) => v for (k, v) in helper_settings);
 end
 
 # ╔═╡ 0a19de7f-5a18-4125-8415-43448bfb0521
-torch_settings = Dict(Symbol(k) => v for (k, v) in helper_settings);
+torch_settings[:dev]="cpu";
 
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
-X = rand(100,256,6,1);
+X = rand(10000,1, 6, 256);
 
 # ╔═╡ d60338cb-5be7-4900-a9d9-63b458d1305e
 Xₜ = torch.Tensor(X);
 
 # ╔═╡ 5d88c349-a3d6-4ee7-844c-67fb2787dca8
-model = TM.VoodooNet(size(Xₜ), NCLASSES; torch_settings...) 
+model = TM.VoodooNet(Xₜ.shape, NCLASSES; torch_settings...) ;
 
-# ╔═╡ 7ce47788-8069-43fe-89f8-901bda0bf1c4
-begin
-	
-py"""
-import toml
-import os
-import numpy as np
-def VoodooPredictor(X):
-    model_setup_file = f'Voodoo/VnetSettings-1.toml'
-    torch_settings = toml.load(os.path.join(model_setup_file))['pytorch']
-    torch_settings.update({'dev': 'cpu'})
-    trained_model = 'Voodoo/Vnet0x60de1687-fnX-gpu0-VN.pt'
-    p = 0.5
-
-    print(f'Loading Vnet model ...... {model_setup_file}')
-
-    # (n_samples, n_Doppler_bins, n_time_steps)
-    X = X[:, :, :, np.newaxis]
-    X = X.transpose(0, 3, 2, 1)
-    X_test = torch.Tensor(X)
-
-    model = TM.VoodooNet(X_test.shape, NCLASSES, **torch_settings)
-    model.load_state_dict(torch.load(trained_model, map_location=model.device)['state_dict'])
-
-    prediction = model.predict(X_test, batch_size=256)
-    prediction = prediction.to('cpu')
-    return prediction
-"""
-py"VoodooPredictor(np.random.rand(100,256,6))"
-end
+# ╔═╡ d81a98c6-66e9-4e74-b419-c9b2ace9c218
+model.load_state_dict(torch.load(trained_model, map_location=model.device)["state_dict"])
 
 # ╔═╡ 0050fd35-755b-4ad5-a483-5b81c7fefbb9
 
@@ -971,7 +944,7 @@ version = "0.9.1+5"
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
 # ╠═d60338cb-5be7-4900-a9d9-63b458d1305e
 # ╠═5d88c349-a3d6-4ee7-844c-67fb2787dca8
-# ╠═7ce47788-8069-43fe-89f8-901bda0bf1c4
+# ╠═d81a98c6-66e9-4e74-b419-c9b2ace9c218
 # ╠═0050fd35-755b-4ad5-a483-5b81c7fefbb9
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
