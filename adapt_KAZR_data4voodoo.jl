@@ -1,5 +1,5 @@
 # function to adapt KAZR spectrum data for Voodoo's input
-function adapt_KAZR_data4voodoo(spec::Dict)
+function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE=true)
 
     # making time steps everey 30 seconds:
     TIME_STEP = 30
@@ -7,7 +7,7 @@ function adapt_KAZR_data4voodoo(spec::Dict)
 
     # spectra time indexes to match cln_time:
     thr_ts = minimum(diff(spec[:time]))
-    idx_ts = map(x -> findfirst((abs.(x .- spec[:time])) .< 2thr_ts), cln_time);
+    idx_ts = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time ]  |> x->filter(!isnothing,x)
     # checking whether "nothing" is found in idx_ts (when nearest time is less than 2*thr)
     idx_ts .|> isnothing |> any && error("Time steps larger than twice the threshold!!")
     
@@ -60,7 +60,7 @@ function adapt_KAZR_data4voodoo(spec::Dict)
     end
 
     # converting features array into normalized array [0, 1]
-    features = η₀₁(features)
+    NORMALIZE && (features = η₀₁(features))
     
     return features, masked, idx_ts, Znn, SNR
 end
@@ -68,7 +68,7 @@ end
 
 # *******************************************************************
 # Function to normilize the spectrum
-function η₀₁(η::Array{Float32,4}; η0 =-95, η1 = -55)
+function η₀₁(η::Array{Float32, 4}; η0 =-100, η1 = -55)
     return @. (η - η0)/(η1 - η0)
 end
 # end of function

@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.16.0
+# v0.17.1
 
 using Markdown
 using InteractiveUtils
@@ -7,8 +7,9 @@ using InteractiveUtils
 # This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
 macro bind(def, element)
     quote
+        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
         local el = $(esc(element))
-        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : missing
+        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
         el
     end
 end
@@ -38,11 +39,11 @@ md"""
 """
 
 # ╔═╡ 79a74f3f-99ea-4020-9c17-d5232360d40d
-hh= 05; dd = 27; mm = 01; yy = 2019;
+hh= 11; dd = 01; mm = 01; yy = 2019; #05 27
 
 # ╔═╡ 2630444a-5a45-4ff5-8afd-5b3750ddbf83
 begin
-	spec_file = ARMtools.getFilePattern(joinpath(homedir(), "LIM/data/utqiagvik-nsa/KAZR/"), "SPECCOPOL", yy, mm, dd, hh=hh)
+	spec_file = ARMtools.getFilePattern(joinpath(homedir(), "LIM/remsens/utqiagvik-nsa/KAZR/"), "SPECCOPOL", yy, mm, dd, hh=hh)
 	#kazr_file = ARMtools.getFilePattern(joinpath(homedir(), "LIM/data/utqiagvik-nsa/KAZR/"), "ARSCL", yy, mm, dd)
 end
 
@@ -54,7 +55,7 @@ end
 # ╔═╡ 9a57a2d2-3c2e-421f-99a2-fc474cb21e12
 begin
 	spec=ARMtools.readSPECCOPOL(spec_file);
-end
+end;
 
 # ╔═╡ 05870c06-167e-4322-8b8c-5cde7beea03d
 md"""
@@ -510,9 +511,9 @@ uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
 [[GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Pkg", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll"]
-git-tree-sha1 = "dba1e8614e98949abfa60480b13653813d8f0157"
+git-tree-sha1 = "0c603255764a1fa0b61752d2bec14cfbd18f7fe8"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
-version = "3.3.5+0"
+version = "3.3.5+1"
 
 [[GR]]
 deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
@@ -694,9 +695,9 @@ uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 
 [[Libffi_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "761a393aeccd6aa92ec3515e428c26bf99575b3b"
+git-tree-sha1 = "0b4a5d71f3e5200a7dff793393e09dfc2d874290"
 uuid = "e9f186c6-92d2-5b65-8a66-fee21dc1b490"
-version = "3.2.2+0"
+version = "3.2.2+1"
 
 [[Libgcrypt_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgpg_error_jll", "Pkg"]
@@ -755,9 +756,9 @@ uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
 
 [[MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "Pkg"]
-git-tree-sha1 = "c253236b0ed414624b083e6b72bfe891fbd2c7af"
+git-tree-sha1 = "5455aef09b40e5020e1520f551fa3135040d4ed0"
 uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
-version = "2021.1.1+1"
+version = "2021.1.1+2"
 
 [[MacroTools]]
 deps = ["Markdown", "Random"]
@@ -1337,7 +1338,7 @@ version = "0.9.1+5"
 # ╠═d73a1172-d3da-456f-821b-56159e62a9b6
 # ╠═0b53165a-0c71-4db5-b81d-e15c265ae391
 # ╠═f329f96b-b09c-4568-b86e-be145e338bfc
-# ╠═b5d2f039-dcfb-4ce7-970f-41b42e8db95e
+# ╟─b5d2f039-dcfb-4ce7-970f-41b42e8db95e
 # ╠═a65ef708-f1ef-48a1-8773-da5a699156a2
 # ╠═8b56d483-69d2-4bfd-8fa5-8d32e58a2749
 # ╠═c10002de-cc57-41e5-a157-cb4ebc134506
