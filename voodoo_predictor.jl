@@ -22,11 +22,14 @@ begin
 	using Dates
 	using ImageFiltering
 	using PlutoUI
-	using CloudnetTools
 end
 
 # ╔═╡ 40bc4a4e-a4d3-4226-a672-ed36cddbb7cf
-using ARMtools
+begin
+    # Using local (own) packages:
+    using ARMtools
+    using CloudnetTools
+end
 
 # ╔═╡ b96a49f9-ba9f-4f58-9c45-43dc878861af
 include("adapt_KAZR_data4voodoo.jl");
@@ -34,11 +37,11 @@ include("adapt_KAZR_data4voodoo.jl");
 # ╔═╡ 38f92d79-4e85-4624-9c71-61321a6f19d0
 md"""
 ~TODO:~
-- [x] Try with MOSAiC W-band radar,
-- [x] adapt SNR as the same dimensions as features Matrix,
-- [ ] include plot of LWP and Spectrum at given height and time,
-- [ ] include Cloudnet classification output,
-- [x] Check Doppler velocity arrangement (negative values == towards ground?),
+- [X] Try with MOSAiC W-band radar,
+- [X] adapt SNR as the same dimensions as features Matrix,
+- [X] include plot of LWP and Spectrum at given height and time,
+- [X] include Cloudnet classification output,
+- [ ] Normalization spectrum-wise,
 """
 
 # ╔═╡ a2eb4a00-f97f-4039-9e06-310b526d425e
@@ -97,19 +100,19 @@ begin
 	yy = 2020 #2019
 	mm = 04 #01
 	dd = 15 #01
-	hh = 18 #04
+	hh = 19 #04
 	
 	# defining Site information:
 	SITE = "arctic-mosaic" # or "utqiagvik-nsa"
-	PRODUCT = "MWACR"  # or "KAZR"
+	PRODUCT = "KAZR" #"MWACR"  # or "KAZR"
 
 	# defining Directory paths:
-	BASE_PATH = joinpath(homedir(), "LIM/data")
+	BASE_PATH = joinpath(homedir(), "LIM/remsens")
 	PATH_DATA = joinpath(BASE_PATH, SITE) #"LIM/remsens/utqiagvik-nsa/KAZR")
 	spec_file = ARMtools.getFilePattern(PATH_DATA, "$(PRODUCT)/SPECCOPOL", yy, mm, dd; hh=hh)
 	!isfile(spec_file) && error("spectrum data does not exist!")
 	
-	radar_file = ARMtools.getFilePattern(PATH_DATA, PRODUCT, yy, mm, dd; hh=hh)
+	radar_file = ARMtools.getFilePattern(PATH_DATA, PRODUCT*"/ARSCL", yy, mm, dd) #; hh=hh)
 	!isfile(radar_file) && error("radar data does not exist!")
 	
 	lidar_file = ARMtools.getFilePattern(PATH_DATA, "HSRL", yy, mm, dd)
@@ -126,6 +129,16 @@ lidar = ARMtools.getLidarData(lidar_file);
 
 # ╔═╡ be890193-3cc1-43d7-be73-b0dedf997cd8
 lidar_it = @. spec[:time][1] ≤ lidar[:time] ≤ spec[:time][end];
+
+# ╔═╡ 16086eb6-f377-49b8-be91-07eb73bf1237
+# Cloudnet Files
+begin
+	#CLNET_PATH = joinpath(BASE_PATH, "CloudNet/arctic-mosaic/TROPOS");
+	CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
+	clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
+	clnet = CloudnetTools.readCLNFile(clnet_file);
+	clnet_it = @. spec[:time][1] ≤ clnet[:time] ≤ spec[:time][end];
+end;
 
 # ╔═╡ 9159391c-59a9-47ba-a641-ea46b4286d55
 #β = ARMtools.raw_to_β(lidar[:β_raw], lidar[:SNR], lidar[:height]);  #calculate_β_from_raw(lidar);
@@ -146,8 +159,7 @@ end;
 begin
 	radar = ARMtools.getKAZRData(radar_file);
 	radar_it = spec[:time][1] .≤ radar[:time] .≤ spec[:time][end];
-	
-end
+end;
 
 # ╔═╡ 387496f2-b895-4cea-9608-8ded2a95b1a0
 # idx_ts is the index of spectrum time matching proxy cloudnet time
@@ -157,29 +169,29 @@ begin
 	thr_ts = minimum(diff(spec[:time]));
 	#idx_ts = map(x -> findfirst((abs.(x .- spec[:time])) .< 2thr_ts), cln_time) |> x->filter(!isnothing,x)
 	idx_ts = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time ]  |> x->filter(!isnothing,x)
-end
+	end;
 
 # ╔═╡ be7b6cc2-3099-4836-b53d-2e94f098810e
 idx_ts .|> isnothing |> any && error("damnnnn!!!")
-
-# ╔═╡ 84953b66-4b1a-4552-8c00-4c7f7fd17e78
-n_samples = let n = spec[:spect_mask][1:150, idx_ts]
-        length(n[n .≥ 0])
-end
 
 # ╔═╡ b759e73a-e050-4d66-b65a-9292ebf4d10e
 spec[:Nspec_ave] = 5;
 
 # ╔═╡ 897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 md"""
-Select spectrum varoable to use: $(@bind spec_var Select([:SNR, :Znn]))
+Select spectrum variable to use: $(@bind spec_var Select([:SNR, :Znn]))
 """
 
 # ╔═╡ ea93b55b-4081-4215-abd2-c1b1dde7fd84
-spec_params = Dict(:Znn=>(-100, -50), :SNR=>(0, 50));
+spec_params = Dict(:Znn=>(-100, -30), :SNR=>(0, 55));
+
+# ╔═╡ 6cf59a76-fa76-4a42-bcf9-778cee6cd05f
+md"""
+#### Adapting Radar data to Voodoo input format and dimentions:
+"""
 
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
-XdB, i_ts = adapt_KAZR_data4voodoo(spec, NORMALIZE=false, var=spec_var); #, ZdB,SNR = ...rand(10000,1, 6, 256);
+XdB, masked, i_ts = adapt_KAZR_data4voodoo(spec, NORMALIZE=false, cln_time = clnet[:time], var=spec_var, Δs=3);
 
 # ╔═╡ 334cb765-732c-4e7f-aad0-1c724f018b40
 nrg, nts = size(masked);
@@ -197,6 +209,10 @@ begin
 	aline = spec[:spect_mask][ahh, tline] + 1
 	# time index for lidar:
 	tlidar = (@. spec[:time][tline] - lidar[:time][lidar_it] |> abs) |> argmin
+	# Height in km for concidered sub-range (default 250)
+	spec_Hkm = 1f-3spec[:height][1:nrg]
+	# Index for the first dimension of X_in (n_samples, 1, 6 , n_vel):
+	idx_pre = (att-1)nrg + ahh
 end;
 
 # ╔═╡ 76c9c29e-31ed-4db7-b450-ef6a21b4a6df
@@ -204,14 +220,11 @@ md"""
 Show Altitude indicator: $(@bind Hx CheckBox(default=true))
 """
 
+# ╔═╡ faff8194-bc69-4ead-8387-db7d4b536f71
+clnet[:LWP][clnet_it][att]
+
 # ╔═╡ 4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
-X = η₀₁(XdB[:,:,:,1:2:end], η0=spec_params[spec_var][1], η1=spec_params[spec_var][2]); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
-
-# ╔═╡ 37428084-a5b6-4417-8314-70f54e484442
-extrema(filter(!isnan,X)), size(XdB), aline, size(spec[:SNR]), 6*30199
-
-# ╔═╡ 37a72097-0de2-4ea4-b409-9779e7d184f2
-extrema(spec[:SNR])
+X = η₀₁(XdB[:,:,:,1:2:end], ηlim = spec_params[spec_var]); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
 
 # ╔═╡ 1eefd855-a523-439b-b734-5021e9039921
 function ∫zdη(η::Matrix; i0=1, i1=size(η,1))
@@ -264,37 +277,35 @@ prediction = model.predict(Xₜ, batch_size=256);
 X_out = prediction.to("cpu").numpy();
 
 # ╔═╡ 5962c23f-3828-4a98-bb42-373bee0c1331
-predict_var = fill(NaN, (size(masked)..., NCLASSES));
+predict_var = reshape(X_out, (size(masked)..., NCLASSES));  #fill(NaN, (size(masked)..., NCLASSES));
 
 # ╔═╡ 61abe2ac-4b88-4936-885f-6fd24fc7f756
 begin
-	s1 = plot(spec[:vel_nn], [spec[:η_hh][:, aline] spec[:Znn][:, aline]], label=["Raw" "Proc"], ylabel="η(v) / dBm", legend=:outerright, left_margin=4Plots.mm)
+	s1 = plot(spec[:vel_nn],
+		try
+			[spec[:η_hh][:, aline] spec[:Znn][:, aline]]
+		catch
+			fill(NaN, length(spec[:vel_nn]))
+		end		
+		, tick_dir=:out, ylim=spec_params[:Znn], xlim=extrema(spec[:vel_nn]), 
+		label=["Raw" "Proc"], ylabel="η(v) / dBm", legend=:outerright, left_margin=4Plots.mm)
+			
+	
 	Z2d, rng_lim = ARMtools.extract2DSpectrogram(spec, tline, var=spec_var);
-	s2 = heatmap(spec[:vel_nn], 1f-3spec[:height], Z2d, c=:berlin, ylim=1f-3rng_lim, clim=spec_params[spec_var], ylabel="height / km", xlabel="Doppler v / m s⁻¹", colorbar=:bottom, left_margin=3Plots.mm, bottom_margin=3Plots.mm);
+	s2 = heatmap(spec[:vel_nn], 1f-3spec[:height], Z2d,
+		c=:berlin, ylim=1f-3rng_lim, xlim=extrema(spec[:vel_nn]), clim=spec_params[spec_var], tick_dir=:out,
+		ylabel="height / km", xlabel="Doppler v / m s⁻¹", colorbar=:bottom,
+		left_margin=3Plots.mm, bottom_margin=3Plots.mm);
 	
 	Hx && hline!([1f-3spec[:height][ahh]], c=:lightgreen, label=false)
-	s3 = plot(predict_var[:, att, 2], 1f-3spec[:height][1:nrg], xlim=(0, 1), ylim=1f-3rng_lim, label="$(Float16(predict_var[ahh, att,2]))");
-	plot!(s3, δ[:, tlidar], 1f-3lidar[:height], xlim=(0, 1), ylim=1f-3rng_lim, xlabel="predictor", label="LDR")
+	s3 = plot(predict_var[:, att, 2], spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, label="p=$(Float16(predict_var[ahh, att,2]))");
+	plot!(s3, δ[:, tlidar], 1f-3lidar[:height], xlim=(0, 1), ylim=1f-3rng_lim, xlabel="predictor", label="Li LDR")
 	Hx && hline!([1f-3spec[:height][ahh]], c=:lightgreen, label=false)
-	s4 = heatmap(X[10,1,:,:], colorbar=false);
+	s4 = heatmap(spec[:vel_nn][1:2:end], [1:6], X[idx_pre,1,:,:], colorbar=false, color=:berlin);
 	# final layout plot
 	ll = @layout [a{0.2h} b{0.3w}; c d]
 	plot(s1, s4, s2, s3, layout=ll, size=(800, 500))
 end
-
-# ╔═╡ c11550be-3f3f-495a-97f9-b590f4a779fe
-let N=0
-	map(1:size(masked, 2)) do i
-			let n = sum(masked[:,i])
-				idx = findall(masked[:,i])
-				predict_var[idx, i, :] = X_out[1+N:n+N, :]
-				N += n;
-		end
-	end
-	#predict_var[:,:,2] = imfilter(predict_var[:,:,2], Kernel.gaussian(3))
-	predict_var[isnan.(predict_var)] .= NaN; #0f0;
-	
-end;
 
 # ╔═╡ 0824c6dd-6c0a-44fc-9468-e97a851f1374
 md"""
@@ -303,7 +314,9 @@ Show time, height indicators: $(@bind THx CheckBox(default=true))
 
 # ╔═╡ 9f2ec824-7c28-409f-8fa1-18f4ed71be11
 begin
-	p0 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], clim=(-37, -5), title="KAZR", color=:jet)
+	p0 = heatmap(clnet[:time][clnet_it], 1f-3clnet[:height][1:nrg], clnet[:Ze][1:nrg, clnet_it], clim=(-25, 15), title="KAZR", color=:jet)
+	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label=false, inset=(1, bbox(0,0,.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true)
+		#radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], clim=(-37, -5), title="KAZR", color=:jet)
 	p1 = heatmap(lidar[:time][lidar_it], 1f-3lidar[:height], δ[:, lidar_it], clim=(0, .4), title="Lidar δ", ylim=(0, 8)) #log10.(β
 	p2 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:SPW][1:nrg, radar_it], clim=(-.5, .5), title="<V>", color=:delta)
 	THx && vline!([spec[:time][tline]], c=:red1, l=:dash, label=false);
@@ -319,7 +332,14 @@ begin
 end
 
 # ╔═╡ e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
-heatmap(lidar[:time], 1f-3lidar[:height], δ, ylim=(0, 3), clim=(0, .23))
+begin
+	lid1 = heatmap(lidar[:time], 1f-3lidar[:height], log10.(β), ylim=(0, 3), clim=(-7, -3)); #clim=(0, .23));
+	lid2 = heatmap(clnet[:time], 1f-3clnet[:height], log10.(clnet[:β]), ylim=(0,3), clim=(-7, -3));
+	plot(lid1, lid2, layout=(2,1))
+end
+
+# ╔═╡ c1bef022-7062-4d68-a58f-3c9576c589cb
+clnet[:β][clnet[:β] .< 1f-8] .= NaN;
 
 # ╔═╡ f07042d7-8c53-41d7-8468-ae1d05143626
 md"""
@@ -1528,15 +1548,16 @@ version = "0.9.1+5"
 # ╠═e2b91f1b-216c-4561-b305-4aa60e676c1b
 # ╠═8f42aa9f-91c7-48e0-acb5-e28ff5a1a2a5
 # ╠═be890193-3cc1-43d7-be73-b0dedf997cd8
+# ╠═16086eb6-f377-49b8-be91-07eb73bf1237
 # ╠═9159391c-59a9-47ba-a641-ea46b4286d55
 # ╠═ad707167-c141-49b8-b316-35173de7b41f
 # ╠═a1951bc2-9527-4524-b21d-78351bdeaa46
 # ╠═387496f2-b895-4cea-9608-8ded2a95b1a0
 # ╠═be7b6cc2-3099-4836-b53d-2e94f098810e
-# ╠═84953b66-4b1a-4552-8c00-4c7f7fd17e78
 # ╠═b759e73a-e050-4d66-b65a-9292ebf4d10e
 # ╠═897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 # ╠═ea93b55b-4081-4215-abd2-c1b1dde7fd84
+# ╟─6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
 # ╠═334cb765-732c-4e7f-aad0-1c724f018b40
 # ╠═d2a9e86f-0752-4026-a580-5479a39d0f16
@@ -1544,9 +1565,8 @@ version = "0.9.1+5"
 # ╠═e73901a0-e9d7-4076-bf40-02ade2a5e6ca
 # ╟─76c9c29e-31ed-4db7-b450-ef6a21b4a6df
 # ╠═61abe2ac-4b88-4936-885f-6fd24fc7f756
+# ╠═faff8194-bc69-4ead-8387-db7d4b536f71
 # ╠═4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
-# ╠═37428084-a5b6-4417-8314-70f54e484442
-# ╠═37a72097-0de2-4ea4-b409-9779e7d184f2
 # ╠═1eefd855-a523-439b-b734-5021e9039921
 # ╠═1648c2d9-2ea2-4903-b480-07011fb5d5d3
 # ╠═9005a3da-36d5-4b41-8030-f8f843010638
@@ -1557,10 +1577,10 @@ version = "0.9.1+5"
 # ╠═0050fd35-755b-4ad5-a483-5b81c7fefbb9
 # ╠═b66ae1a4-40a3-43cb-b75a-5822c787a316
 # ╠═5962c23f-3828-4a98-bb42-373bee0c1331
-# ╠═c11550be-3f3f-495a-97f9-b590f4a779fe
 # ╟─0824c6dd-6c0a-44fc-9468-e97a851f1374
 # ╠═9f2ec824-7c28-409f-8fa1-18f4ed71be11
 # ╠═e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
+# ╠═c1bef022-7062-4d68-a58f-3c9576c589cb
 # ╟─f07042d7-8c53-41d7-8468-ae1d05143626
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

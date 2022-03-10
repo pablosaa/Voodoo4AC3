@@ -1,7 +1,11 @@
 # function to adapt KAZR spectrum data for Voodoo's input
-function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE=true, var::Symbol=:Znn, cln_time::Vector{DateTime}=[], TIME_STEP=30)
+function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE::Bool=true,
+                                var::Symbol=:Znn,
+                                cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
+                                TIME_STEP::Int = 30,
+                                Δs::Int = 1)
 
-    # 1) ++++
+    ## 1) ++++
     # Correcting spectral reflectivity for noise level:
     spec[:Znn], spec[:SNR] = if haskey(spec, :Nspec_ave)
         ARMtools.Extract_Spectra_NL(spec[:η_hh]; p=Int64(spec[:Nspec_ave]))
@@ -9,12 +13,14 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE=true, var::Symbol=:Znn, cl
         ARMtools.Extract_Spectra_NL(spec[:η_hh])
     end
 
-    # 2) ++++
-    # making time steps everey 30 seconds:
+    ## 2) ++++
+    # if cloudnet time not provided then make time steps every 30 seconds:
     cln_time = if isempty(cln_time)
-        let Δt = Second(TIME_STEP)
+        let Δt = Dates.Second(TIME_STEP)
             round(spec[:time][1], Δt):Δt:round(spec[:time][end], Δt)
         end
+    else
+        cln_time;
     end
         
     # spectrum time indexes to match cln_time:
@@ -23,59 +29,53 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE=true, var::Symbol=:Znn, cl
     # checking whether "nothing" is found in idx_ts (when nearest time is less than 2*thr)
     idx_ts .|> isnothing |> any && error("Time steps larger than twice the threshold!!")
 
-    # 3) ++++
-    # selecting the 6 spectra around time step:
-    ii_6spec = map(idx_ts) do j
-        let n_ts = length(spec[:time])
-            x_ini = ifelse( 3 ≤ j ≤ n_ts-5, j-2, min(j, n_ts-5))
-            range(x_ini, length=6)
-        end
-    end
-    ii_6spec = hcat(ii_6spec...);  # (6 x n_ts)
+    ## 3) ++++
+    # Definition of dimension for output variables:
+    # * Height dimension:
+    n_rg = 250
 
-    # dimensions for output file:
-    ##n_samples = map(1:6) do i_6p
-    ##    local n = spec[:spect_mask][:, ii_6spec[i_6p, :]]
-    ##    length(n[n .≥ 0])
-    ##end |> maximum
-    n_rg = 250 #length(spec[:height])
-    
-    n_samples = filter(≥(0), spec[:spect_mask][1:n_rg, idx_ts]) |> length
-        
+    # * Time dimesnion:
+    n_ts = length(idx_ts);
+
+    # * Number of samples:
+    #n_samples = filter(≥(0), spec[:spect_mask][1:n_rg, idx_ts]) |> length
+    n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
+
+    # * Number of spectral dimension:
     n_vel = length(spec[:vel_nn])
-    
-    n_ts = length(spec[:time])
 
-    # 4) ++++ output variables:
-    # defining output array: features & masked
-    # masked = @. ifelse(spec[:spect_mask][1:n_rg, idx_ts] ≥ 0, true, false)    
-
+    ## 4) ++++
+    # Creating the feature output array:
     # according to voodoo predictor: (n_samples, n_ch=1, n_ts=6, n_vel)
-    features = fill(NaN32, (n_samples, 1, 6, n_vel))
+    features = fill(NaN, (n_samples, 1, 6, n_vel))
 
     # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
     fuzzydat = PermutedDimsArray(features, (4, 1, 2, 3))
 
-    fuzzydat = let k = ii_6spec[3, :]
-        local garbage = view(spec[:spec_mask][1:n_rg, k]) .+ 1
-        fill(spec[var][:, garbage], (n_vel, n_samples, 1, 6))
+    ## 5) ++++
+    # Filling feature array with data:
+    n_ts = length(spec[:time])
+    k = 0
+    foreach(range(-2Δs, step=Δs, length=6)) do j
+        k += 1 
+        idx_in = @. min(n_ts, max(1, (idx_ts + j)))
+        
+        dat_in = spec[:spect_mask][1:n_rg, idx_in] .≥ 0
+        tmp_spec = spec[:spect_mask][1:n_rg, idx_in][dat_in] .+ 1
+        tmp_dat = dat_in[:]
+        fuzzydat[:, tmp_dat, 1, k] = spec[var][:, tmp_spec]
+        
     end
     
-    for i_6p ∈ (1, 2, 4, 5, 6)
-        garbage = map(spec[:spect_mask][1:n_rg, ii_6spec[i_6p, :] ]) do x   #i_6p
-            x .≥ 0 ? x+1 : missing
-        end;
+    # 6) ++++ output variables:
+    # defining output array: masked
+    masked = @. ifelse(spec[:spect_mask][1:n_rg, idx_ts] ≥ 0, true, false)
 
-        let var_rg = skipmissing(garbage) |> collect
-            local n_subsample = min(length(var_rg), n_samples)
-            fuzzydat[:, 1:n_subsample, 1, i_6p] = spec[var][:, var_rg[1:n_subsample]]
-        end
-    end
-
+    # 7) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
     NORMALIZE && (features = η₀₁(features))
     
-    return features, idx_ts
+    return features, masked, idx_ts
 end
 # ---/PermutedDimsArray(features, (2, 3, 4, 1))
 
@@ -91,18 +91,21 @@ for other min/max limit values e.g. -90 and -50.
 All values outside the range min to max are set-up to 0 and 1. 
 
 """
-function η₀₁(η::Array{Float32, 4}; η0 =-100, η1 = -50)
+function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim::Tuple{Int, Int} = (-100, -50))
+    η0 = ηlim[1]
+    η1 = ηlim[2]
     H_out = @. (η - η0)/(η1 - η0)
-    @. H_out[H_out > 1] = 1f0
-    @. H_out[H_out < 0] = 0f0
-    
+    @. H_out = min(1, H_out) # H_out[H_out > 1] = 1f0
+    @. H_out = max(0, H_out) #[H_out < 0] = 0f0
+    # removing NaNs:
+    @. H_out[isnan(H_out)] = 0
     return H_out
 end
 # end of function
 
 # Alternative function to normalize based on (min, max) of given dimension:
 # Input Arrray must have (n_samples, 1, 6, n_vel)
-function Norm_dim(X::Array{Float32, 4}; dims=1)
+function Norm_dim(X::Array{<:AbstractFloat, 4}; dims=1)
     X0, X1 = extrema(X, dims=4)
     return η₀₁(X, η0=X0, η1=X1)
 end
