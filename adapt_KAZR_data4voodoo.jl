@@ -3,7 +3,8 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE::Bool=true,
                                 var::Symbol=:Znn,
                                 cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                                 TIME_STEP::Int = 30,
-                                Δs::Int = 1)
+                                Δs::Int = 1,
+                                MaxHkm::Float64 = 8.0)
 
     ## 1) ++++
     # Correcting spectral reflectivity for noise level:
@@ -32,7 +33,7 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE::Bool=true,
     ## 3) ++++
     # Definition of dimension for output variables:
     # * Height dimension:
-    n_rg = 250
+    n_rg = findlast(≤(MaxHkm), 1f-3spec[:height]); #250
 
     # * Time dimesnion:
     n_ts = length(idx_ts);
@@ -55,9 +56,8 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE::Bool=true,
     ## 5) ++++
     # Filling feature array with data:
     n_ts = length(spec[:time])
-    k = 0
-    foreach(range(-2Δs, step=Δs, length=6)) do j
-        k += 1 
+
+    foreach(enumerate(range(-2Δs, step=Δs, length=6))) do (k, j)
         idx_in = @. min(n_ts, max(1, (idx_ts + j)))
         
         dat_in = spec[:spect_mask][1:n_rg, idx_in] .≥ 0
@@ -73,41 +73,12 @@ function adapt_KAZR_data4voodoo(spec::Dict; NORMALIZE::Bool=true,
 
     # 7) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
-    NORMALIZE && (features = η₀₁(features))
+    NORMALIZE && (features = voodoo.η₀₁(features))
     
     return features, masked, idx_ts
 end
 # ---/PermutedDimsArray(features, (2, 3, 4, 1))
 
-# *******************************************************************
-# Function to normalize the spectrum
-"""
-Function to normalize spectrum data.
-   > η = η₀₁(Znn)
-with default normalization min and max limits -100 and -55, respectively.
-or
-   > η = η₀₁(Znn, η0 = -90, η1 = -50)
-for other min/max limit values e.g. -90 and -50.
-All values outside the range min to max are set-up to 0 and 1. 
 
-"""
-function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim::Tuple{Int, Int} = (-100, -50))
-    η0 = ηlim[1]
-    η1 = ηlim[2]
-    H_out = @. (η - η0)/(η1 - η0)
-    @. H_out = min(1, H_out) # H_out[H_out > 1] = 1f0
-    @. H_out = max(0, H_out) #[H_out < 0] = 0f0
-    # removing NaNs:
-    @. H_out[isnan(H_out)] = 0
-    return H_out
-end
-# end of function
-
-# Alternative function to normalize based on (min, max) of given dimension:
-# Input Arrray must have (n_samples, 1, 6, n_vel)
-function Norm_dim(X::Array{<:AbstractFloat, 4}; dims=1)
-    X0, X1 = extrema(X, dims=4)
-    return η₀₁(X, η0=X0, η1=X1)
-end
 # ----/
 
