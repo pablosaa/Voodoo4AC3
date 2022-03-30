@@ -35,15 +35,9 @@ begin
 	using TOML
 end
 
-# ╔═╡ 2d97b001-c002-4d29-8925-8e6f16b2d77e
-using Zarr
-
 # ╔═╡ d19215a4-20d0-40ad-a03a-c77ed3f91da9
 include("Voodoo4AC3.jl");
 #torch = pyimport("torch");
-
-# ╔═╡ b96a49f9-ba9f-4f58-9c45-43dc878861af
-include("adapt_KAZR_data4voodoo.jl");
 
 # ╔═╡ 38f92d79-4e85-4624-9c71-61321a6f19d0
 md"""
@@ -62,17 +56,10 @@ main {
 }
 """
 
-# ╔═╡ 04caeb3e-b89f-4657-87e8-17001fac32c3
-#pushfirst!(PyVector(pyimport("sys")."path"), joinpath(@__DIR__, "Voodoo") );
-	
-
 # ╔═╡ ba096470-3f16-4085-a073-3c632d534623
 md"""
 #### Loading _Voodoo_ library:
 """
-
-# ╔═╡ a387a98f-b97e-4b62-a1d7-2289876df282
-#TM = pyimport("libVoodoo.TorchModel");
 
 # ╔═╡ 82e5b299-86bb-4493-b71e-5f15ac8fa2b4
 md"""
@@ -102,25 +89,28 @@ md"""
 ### Obtaining KAZR spectrum data & adapting to _Voodoo_ input shape
 """
 
+# ╔═╡ b96a49f9-ba9f-4f58-9c45-43dc878861af
+#include("adapt_KAZR_data4voodoo.jl");
+
 # ╔═╡ 5a6e813d-a7ff-4d6b-bf5d-943327beece9
 begin
 	# defining date and time to analyze:
 	yy = 2020 #2019
-	mm = 04 #01
-	dd = 15 #01
-	hh = 19 #04
+	mm = 02 #04 #01
+	dd = 06 #15 #01
+	hh = 17 #04
 	
 	# defining Site information:
 	SITE = "arctic-mosaic" # or "utqiagvik-nsa"
-	PRODUCT = "MWACR"  #"KAZR" # or "KAZR"
+	PRODUCT = "KAZR" # "MWACR"  # or 
 
 	# defining Directory paths:
-	BASE_PATH = joinpath(homedir(), "LIM/data") #remsens")
+	BASE_PATH = joinpath(homedir(), "LIM/data") #remsens") #
 	PATH_DATA = joinpath(BASE_PATH, SITE) #"LIM/remsens/utqiagvik-nsa/KAZR")
 	spec_file = ARMtools.getFilePattern(PATH_DATA, "$(PRODUCT)/SPECCOPOL", yy, mm, dd; hh=hh)
 	!isfile(spec_file) && error("spectrum data does not exist!")
 	
-	radar_file = ARMtools.getFilePattern(PATH_DATA, PRODUCT, yy, mm, dd; hh=hh)
+	radar_file = ARMtools.getFilePattern(PATH_DATA, PRODUCT*"/GE", yy, mm, dd; hh=hh)
 	!isfile(radar_file) && error("radar data does not exist!")
 	
 	lidar_file = ARMtools.getFilePattern(PATH_DATA, "HSRL", yy, mm, dd)
@@ -130,7 +120,7 @@ begin
 end
 
 # ╔═╡ e2b91f1b-216c-4561-b305-4aa60e676c1b
-spec = ARMtools.readSPECCOPOL(isfile(spec_file) && spec_file);
+spec = ARMtools.readSPECCOPOL(isfile(spec_file) && spec_file[1]);
 
 # ╔═╡ 8f42aa9f-91c7-48e0-acb5-e28ff5a1a2a5
 lidar = ARMtools.getLidarData(lidar_file);
@@ -138,18 +128,22 @@ lidar = ARMtools.getLidarData(lidar_file);
 # ╔═╡ be890193-3cc1-43d7-be73-b0dedf997cd8
 lidar_it = @. spec[:time][1] ≤ lidar[:time] ≤ spec[:time][end];
 
+# ╔═╡ c6bfcff5-6f58-4e78-92e9-62e32b8f3037
+md"""
+### Reading CloudNet Classification data
+"""
+
 # ╔═╡ 16086eb6-f377-49b8-be91-07eb73bf1237
-# Cloudnet Files
 begin
 	#CLNET_PATH = joinpath(BASE_PATH, "CloudNet/arctic-mosaic/TROPOS");
 	CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
 	clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
-	clnet = CloudnetTools.readCLNFile(clnet_file);
+	class_file = ARMtools.getFilePattern(CLNET_PATH, "classification", yy, mm, dd, fileext=".nc");
+	clnet = CloudnetTools.readCLNFile(clnet_file, altfile=class_file);
 	clnet_it = @. spec[:time][1] ≤ clnet[:time] ≤ spec[:time][end];
+	clnet[:β][clnet[:β] .< 1f-8] .= NaN;
+	
 end;
-
-# ╔═╡ 9159391c-59a9-47ba-a641-ea46b4286d55
-#β = ARMtools.raw_to_β(lidar[:β_raw], lidar[:SNR], lidar[:height]);  #calculate_β_from_raw(lidar);
 
 # ╔═╡ ad707167-c141-49b8-b316-35173de7b41f
 begin
@@ -165,7 +159,7 @@ end;
 
 # ╔═╡ a1951bc2-9527-4524-b21d-78351bdeaa46
 begin
-	radar = ARMtools.getKAZRData(radar_file);
+	radar = ARMtools.getKAZRData(radar_file[1]);
 	radar_it = spec[:time][1] .≤ radar[:time] .≤ spec[:time][end];
 end;
 
@@ -191,7 +185,7 @@ Select spectrum variable to use: $(@bind spec_var Select([:Znn, :SNR]))
 """
 
 # ╔═╡ ea93b55b-4081-4215-abd2-c1b1dde7fd84
-spec_params = Dict(:Znn=>(-100, -30), :SNR=>(0, 55));
+spec_params = Dict(:Znn=>(-100, -50), :SNR=>(0, 30));
 
 # ╔═╡ 6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 md"""
@@ -199,7 +193,11 @@ md"""
 """
 
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
-XdB, masked, i_ts = adapt_KAZR_data4voodoo(spec, NORMALIZE=false, cln_time = clnet[:time], var=spec_var, Δs=3);
+begin
+    XdB = voodoo.adapt_RadarData(spec, NORMALIZE=false, var=spec_var, Δs=3); #cln_time = clnet[:time][clnet_it],
+    masked = XdB[:masked]
+    i_ts = XdB[:idx_ts];
+end;
 
 # ╔═╡ 334cb765-732c-4e7f-aad0-1c724f018b40
 nrg, nts = size(masked);
@@ -216,7 +214,7 @@ begin
 	tline = i_ts[att];
 	aline = spec[:spect_mask][ahh, tline] + 1
 	# time index for lidar:
-	tlidar = (@. spec[:time][tline] - lidar[:time][lidar_it] |> abs) |> argmin
+	tlidar = (@. spec[:time][tline] - lidar[:time] |> abs) |> argmin # [lidat_it]
 	# Height in km for concidered sub-range (default 250)
 	spec_Hkm = 1f-3spec[:height][1:nrg]
 	# Index for the first dimension of X_in (n_samples, 1, 6 , n_vel):
@@ -228,11 +226,19 @@ md"""
 Show Altitude indicator: $(@bind Hx CheckBox(default=true))
 """
 
+# ╔═╡ db9f4982-d7a1-4a96-816a-9e26148d7669
+lidar[:time][tlidar]
+
+# ╔═╡ b1cf79c9-b702-4e14-aad7-466b615043ea
+extrema(filter(!isnan,β)) .|> x->0.5f+4x
+
 # ╔═╡ faff8194-bc69-4ead-8387-db7d4b536f71
 clnet[:LWP][clnet_it][att]
 
 # ╔═╡ 4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
-X = voodoo.η₀₁(XdB[:,:,:,1:2:end], ηlim = spec_params[spec_var]); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
+begin
+    X = voodoo.η₀₁(XdB[:feature], ηlim = spec_params[spec_var]); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
+end;
 
 # ╔═╡ 1eefd855-a523-439b-b734-5021e9039921
 function ∫zdη(η::Matrix; i0=1, i1=size(η,1))
@@ -269,21 +275,6 @@ begin
 end;
 	
 
-# ╔═╡ d60338cb-5be7-4900-a9d9-63b458d1305e
-##Xₜ = torch.Tensor(X);
-
-# ╔═╡ 5d88c349-a3d6-4ee7-844c-67fb2787dca8
-##model = TM.VoodooNet(Xₜ.shape, NCLASSES; torch_settings...) ;
-
-# ╔═╡ d81a98c6-66e9-4e74-b419-c9b2ace9c218
-##model.load_state_dict(torch.load(trained_model, map_location=model.device)["state_dict"])
-
-# ╔═╡ 0050fd35-755b-4ad5-a483-5b81c7fefbb9
-##prediction = model.predict(Xₜ, batch_size=256);
-
-# ╔═╡ b66ae1a4-40a3-43cb-b75a-5822c787a316
-##X_out = prediction.to("cpu").numpy();
-
 # ╔═╡ 5962c23f-3828-4a98-bb42-373bee0c1331
 predict_var = voodoo.MakePrediction(X, sizeout=size(masked)); ##reshape(X_out, (size(masked)..., NCLASSES));  #fill(NaN, (size(masked)..., NCLASSES));
 
@@ -296,23 +287,25 @@ begin
 			fill(NaN, length(spec[:vel_nn]))
 		end		
 		, tick_dir=:out, ylim=spec_params[:Znn], xlim=extrema(spec[:vel_nn]), 
-		label=["Raw" "Proc"], ylabel="η(v) / dBm", legend=:outerright, left_margin=4Plots.mm)
+		label=["Raw" "Proc"], ylabel="η(v) / dBm", legend=:outerright, left_margin=4Plots.mm,
+		title="Spectrum at $(Dates.format(clnet[:time][clnet_it][att], "HH:MM")) and $(round(1f-3spec[:height][ahh], digits=1)) km")
 			
 	
 	Z2d, rng_lim = ARMtools.extract2DSpectrogram(spec, tline, var=spec_var);
 	s2 = heatmap(spec[:vel_nn], 1f-3spec[:height], Z2d,
-		c=:berlin, ylim=1f-3rng_lim, xlim=extrema(spec[:vel_nn]), clim=spec_params[spec_var], tick_dir=:out,
+		c=:dense, ylim=1f-3rng_lim, xlim=extrema(spec[:vel_nn]), clim=spec_params[spec_var], tick_dir=:out,
 		ylabel="height / km", xlabel="Doppler v / m s⁻¹", colorbar=:bottom,
 		left_margin=3Plots.mm, bottom_margin=3Plots.mm);
 	
-	Hx && hline!([1f-3spec[:height][ahh]], c=:lightgreen, label=false)
-	s3 = plot(predict_var[:, att, 2], spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, label="p=$(Float16(predict_var[ahh, att,2]))");
-	plot!(s3, δ[:, tlidar], 1f-3lidar[:height], xlim=(0, 1), ylim=1f-3rng_lim, xlabel="predictor", label="Li LDR")
-	Hx && hline!([1f-3spec[:height][ahh]], c=:lightgreen, label=false)
-	s4 = heatmap(spec[:vel_nn][1:2:end], [1:6], X[idx_pre,1,:,:], colorbar=false, color=:berlin);
+	Hx && hline!([1f-3spec[:height][ahh]], c=:green, l=:dash, label=false)
+	s3 = plot(predict_var[:, att, 2], spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, label="$(Float16(predict_var[ahh, att,2]))");
+	plot!(s3, 0.5f+4β[:, tlidar], 1f-3lidar[:height], xlim=(0, 1), ylim=1f-3rng_lim,
+		xlabel="predictor @ LWP=$(round(clnet[:LWP][clnet_it][att], digits=1)) g m⁻²", label="lidar β", legend=:bottomright)
+	Hx && hline!([1f-3spec[:height][ahh]], c=:green, l=:dash, label=false)
+	s4 = heatmap(spec[:vel_nn][1:2:end], [1:6], X[idx_pre,1,:,:], colorbar=false, color=:dense, clim=(0,1));
 	# final layout plot
 	ll = @layout [a{0.2h} b{0.3w}; c d]
-	plot(s1, s4, s2, s3, layout=ll, size=(800, 500))
+	plot(s1, s4, s2, s3, layout=ll, size=(900, 500))
 end
 
 # ╔═╡ 0824c6dd-6c0a-44fc-9468-e97a851f1374
@@ -320,50 +313,54 @@ md"""
 Show time, height indicators: $(@bind THx CheckBox(default=true))
 """
 
+# ╔═╡ 537c4737-9db9-4275-ae88-3ee34ce3d1c7
+I2d
+
+# ╔═╡ dc1f6a63-bd06-4bb7-86a3-68e9b1f594b6
+H2d
+
 # ╔═╡ 9f2ec824-7c28-409f-8fa1-18f4ed71be11
 begin
-	p0 = heatmap(clnet[:time][clnet_it], 1f-3clnet[:height][1:nrg], clnet[:Ze][1:nrg, clnet_it], clim=(-25, 15), title="KAZR", color=:jet)
-	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label=false, inset=(1, bbox(0,0,.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true)
-		#radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], clim=(-37, -5), title="KAZR", color=:jet)
-	p1 = heatmap(lidar[:time][lidar_it], 1f-3lidar[:height], δ[:, lidar_it], clim=(0, .4), title="Lidar δ", ylim=(0, 8)) #log10.(β
-	p2 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:SPW][1:nrg, radar_it], clim=(-.5, .5), title="<V>", color=:delta)
+    tm_tick = clnet[:time][1]:Minute(10):clnet[:time][end]
+    str_tick = Dates.format.(tm_tick, "H:MM")
+	p0 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], clim=(-35, -15), title="$(PRODUCT) Z [dB]", color=:jet, xticks=(tm_tick, str_tick))
+		#heatmap(clnet[:time][clnet_it], 1f-3clnet[:height][1:nrg], clnet[:Ze][1:nrg, clnet_it], clim=(-25, 15), title="$(PRODUCT) Z [dB]", color=:jet)
+		
+	p1 = heatmap(lidar[:time][lidar_it], 1f-3lidar[:height], log10.(β[:, lidar_it]), clim=(-7, -4), title="HSRL β", ylim=(0, 8), color=:roma, xticks=(tm_tick, str_tick), xlabel="UTC from $(dd).$(mm).$(yy)" )
 	THx && vline!([spec[:time][tline]], c=:red1, l=:dash, label=false);
 	THx && hline!([1f-3spec[:height][ahh]], c=:red1, l=:dash, label=false);
+	
+	p2 = heatmap(lidar[:time][lidar_it], 1f-3lidar[:height], δ[:, lidar_it], clim=(0, .4), title="HSRL δ", ylim=(0, 8), color=:jet, xticks=(tm_tick, str_tick))
+		#heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:SPW][1:nrg, radar_it], clim=(-.5, .5), title="spectral width", color=:delta, xticks=(tm_tick, str_tick))
 	
 	cs1 = palette(:viridis, 8)
 	cs1.colors.colors[1] = RGB{Float64}(.7, .7, .7)
-	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,2], clim=(.5, 1), color=cs1, title="cloud-droplets");
+	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,2], clim=(.5, 1), color=cs1,
+		title="cloud-droplets detection", xticks=(tm_tick, str_tick));
+	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true, ytickfontsize=8)
+
 	THx && vline!([spec[:time][tline]], c=:red1, l=:dash, label=false);
 	THx && hline!([1f-3spec[:height][ahh]], c=:red1, l=:dash, label=false);
 	#p4 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,3], clim=(.5, 1), color=cs1, title="non-cloud-droplets (ice/drizze/rain)")
-	plot(p0,p2,p3,p1, layout=(4,1), size=(800,999))
+	plot(p0,p3,p2,p1, layout=(4,1), size=(800,999))
 end
 
-# ╔═╡ e360995e-c83b-471f-920c-7770ec9f05bc
+# ╔═╡ 203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 begin
-	OUTDAT_PATH = joinpath(pwd(), "data/")
-	
-	zfilen = basename(clnet_file) |> x-> joinpath(pwd(), "data", replace(x, "categorize.nc"=>"voodoo.zarr"))
-	Zcompressor = Zarr.BloscCompressor(cname="zstd", clevel=3, shuffle=true)
-	sizeout = size(masked)
-	if isfile(zfilen)
-		append!(Zₚᵣₑ, predict_var[:,:,2])
-	else
-		Zₚᵣₑ = zcreate(eltype(predict_var), sizeout..., chunks=sizeout,
-			compressor=Zcompressor, path=zfilen)
-		Zₚᵣₑ[:,:] = predict_var[:,:,2];
-	end
+	cln_plt = CloudnetTools.Vis.show_classific(clnet, showatm=Dict(:isoT=>false, :wind=>false), showlegend=false);
+	vline!([spec[:time][tline]], c=:red1, ylim=(0, 8), l=:dash, label=false)# , subplot=2, inset=(1, bbox(0,0,1,1)))
+	hline!([1f-3spec[:height][ahh]], c=:red1, l=:dash, label=false);
 end
 
 # ╔═╡ e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
 begin
-	lid1 = heatmap(lidar[:time], 1f-3lidar[:height], log10.(β), ylim=(0, 3), clim=(-7, -3)); #clim=(0, .23));
-	lid2 = heatmap(clnet[:time], 1f-3clnet[:height], log10.(clnet[:β]), ylim=(0,3), clim=(-7, -3));
+	lid1 = heatmap(lidar[:time], 1f-3lidar[:height], log10.(β), ylim=(0, 4), clim=(-7, -3)); #clim=(0, .23));
+	lid2 = heatmap(clnet[:time], 1f-3clnet[:height], log10.(clnet[:β]), ylim=(0, 4), clim=(-7, -3));
 	plot(lid1, lid2, layout=(2,1))
 end
 
 # ╔═╡ c1bef022-7062-4d68-a58f-3c9576c589cb
-clnet[:β][clnet[:β] .< 1f-8] .= NaN;
+
 
 # ╔═╡ f07042d7-8c53-41d7-8468-ae1d05143626
 md"""
@@ -386,7 +383,6 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
-Zarr = "0a941bbe-ad1d-11e8-39d9-ab76183a1d99"
 
 [compat]
 ARMtools = "~0.1.0"
@@ -395,7 +391,6 @@ ImageFiltering = "~0.7.0"
 Plots = "~1.21.3"
 PlutoUI = "~0.7.20"
 PyCall = "~1.93.1"
-Zarr = "~0.7.1"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -412,12 +407,6 @@ repo-rev = "main"
 repo-url = "git@github.com:pablosaa/ARMtools.jl.git"
 uuid = "04fa4220-f7a9-42e2-a909-1083f698c312"
 version = "0.1.0"
-
-[[deps.AWS]]
-deps = ["Base64", "Compat", "Dates", "Downloads", "GitHub", "HTTP", "IniFile", "JSON", "MbedTLS", "Mocking", "OrderedCollections", "Retry", "Sockets", "URIs", "UUIDs", "XMLDict"]
-git-tree-sha1 = "07d944e4d9946c2061f97c1564d1b7ae8ea8f189"
-uuid = "fbe9abb3-538b-5e4e-ba9e-bc94f4f92ebc"
-version = "1.61.0"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -451,18 +440,6 @@ version = "1.0.1"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
-
-[[deps.Blosc]]
-deps = ["Blosc_jll"]
-git-tree-sha1 = "310b77648d38c223d947ff3f50f511d08690b8d5"
-uuid = "a74b3585-a348-5f62-a45c-50e91977d574"
-version = "0.7.3"
-
-[[deps.Blosc_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Lz4_jll", "Pkg", "Zlib_jll", "Zstd_jll"]
-git-tree-sha1 = "91d6baa911283650df649d0aea7c28639273ae7b"
-uuid = "0b7ba130-8d10-5ba8-a3d6-c5182647fed9"
-version = "1.21.1+0"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -507,12 +484,6 @@ repo-rev = "main"
 repo-url = "/home/psgarfias/LIM/repos/CloudnetTools.jl"
 uuid = "c185f6a1-06dd-4ea4-b2f4-959e91ffad06"
 version = "0.1.0"
-
-[[deps.CodecZlib]]
-deps = ["TranscodingStreams", "Zlib_jll"]
-git-tree-sha1 = "ded953804d019afa9a3f98981d99b33e3db7b6da"
-uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
-version = "0.7.0"
 
 [[deps.ColorSchemes]]
 deps = ["ColorTypes", "Colors", "FixedPointNumbers", "Random"]
@@ -600,12 +571,6 @@ uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 deps = ["Mmap"]
 uuid = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 
-[[deps.DiskArrays]]
-deps = ["OffsetArrays"]
-git-tree-sha1 = "1fafbf0ca0f71dfba5cd250e08efae640a49ee20"
-uuid = "3c3547ce-8d99-4f5e-a174-61eb10b00ae3"
-version = "0.3.2"
-
 [[deps.Distributed]]
 deps = ["Random", "Serialization", "Sockets"]
 uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
@@ -636,12 +601,6 @@ version = "2.4.4+0"
 git-tree-sha1 = "56559bbef6ca5ea0c0818fa5c90320398a6fbf8d"
 uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
 version = "0.1.8"
-
-[[deps.EzXML]]
-deps = ["Printf", "XML2_jll"]
-git-tree-sha1 = "0fa3b52a04a4e210aeb1626def9c90df3ae65268"
-uuid = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
-version = "1.1.0"
 
 [[deps.FFMPEG]]
 deps = ["FFMPEG_jll"]
@@ -732,12 +691,6 @@ deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Li
 git-tree-sha1 = "9b02998aba7bf074d14de89f9d37ca24a1a0b046"
 uuid = "78b55507-aeef-58d4-861c-77aaff3498b1"
 version = "0.21.0+0"
-
-[[deps.GitHub]]
-deps = ["Base64", "Dates", "HTTP", "JSON", "MbedTLS", "Sockets", "SodiumSeal", "URIs"]
-git-tree-sha1 = "056781ae7b953289778408b136f8708a46837979"
-uuid = "bc5e4493-9b4d-5f90-b8aa-2b2bcaad7a26"
-version = "5.7.2"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE_jll", "Pkg", "Zlib_jll"]
@@ -893,11 +846,6 @@ git-tree-sha1 = "bf36f528eec6634efc60d7ec062008f171071434"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
 version = "3.0.0+1"
 
-[[deps.LRUCache]]
-git-tree-sha1 = "d64a0aff6691612ab9fb0117b0995270871c5dfc"
-uuid = "8ac3fa9e-de4c-5943-b1dc-09c6b5f20637"
-version = "1.3.0"
-
 [[deps.LZO_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "e5b909bcf985c5e2605737d2ce278ed791b89be6"
@@ -998,12 +946,6 @@ version = "0.3.6"
 
 [[deps.Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
-
-[[deps.Lz4_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "5d494bc6e85c4c9b626ee0cab05daa4085486ab1"
-uuid = "5ced341a-0733-55b8-9ab6-a4889d929147"
-version = "1.9.3+0"
 
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "Pkg"]
@@ -1250,11 +1192,6 @@ git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.0"
 
-[[deps.Retry]]
-git-tree-sha1 = "41ac127cd281bb33e42aba46a9d3b25cd35fc6d5"
-uuid = "20febd7b-183b-5ae2-ac4a-720e7ce64774"
-version = "0.4.1"
-
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 
@@ -1279,12 +1216,6 @@ version = "1.0.3"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
-
-[[deps.SodiumSeal]]
-deps = ["Base64", "Libdl", "libsodium_jll"]
-git-tree-sha1 = "80cef67d2953e33935b41c6ab0a178b9987b1c99"
-uuid = "2133526b-2bfb-4018-ac12-889fb3908a75"
-version = "0.1.1"
 
 [[deps.SortingAlgorithms]]
 deps = ["DataStructures"]
@@ -1378,12 +1309,6 @@ git-tree-sha1 = "0f1017f68dc25f1a0cb99f4988f78fe4f2e7955f"
 uuid = "f269a46b-ccf7-5d73-abea-4c690281aa53"
 version = "1.7.1"
 
-[[deps.TranscodingStreams]]
-deps = ["Random", "Test"]
-git-tree-sha1 = "216b95ea110b5972db65aa90f88d8d89dcb8851c"
-uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
-version = "0.9.6"
-
 [[deps.URIs]]
 git-tree-sha1 = "97bbe755a53fe859669cd907f2d96aee8d2c1355"
 uuid = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
@@ -1430,12 +1355,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "1acf5bdf07aa0907e0a37d3718bb88d4b687b74a"
 uuid = "02c8fc9c-b97f-50b9-bbe4-9be30ff0a78a"
 version = "2.9.12+0"
-
-[[deps.XMLDict]]
-deps = ["EzXML", "IterTools", "OrderedCollections"]
-git-tree-sha1 = "d9a3faf078210e477b291c79117676fca54da9dd"
-uuid = "228000da-037f-5747-90a9-8195ccbf91a5"
-version = "0.4.1"
 
 [[deps.XSLT_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgcrypt_jll", "Libgpg_error_jll", "Libiconv_jll", "Pkg", "XML2_jll", "Zlib_jll"]
@@ -1569,12 +1488,6 @@ git-tree-sha1 = "79c31e7844f6ecf779705fbc12146eb190b7d845"
 uuid = "c5fb5394-a638-5e4d-96e5-b29de1b5cf10"
 version = "1.4.0+3"
 
-[[deps.Zarr]]
-deps = ["AWS", "Blosc", "CodecZlib", "DataStructures", "Dates", "DiskArrays", "HTTP", "JSON", "LRUCache", "OffsetArrays", "Pkg", "URIs"]
-git-tree-sha1 = "47a53313f4493879345f217e20146c4c40774520"
-uuid = "0a941bbe-ad1d-11e8-39d9-ab76183a1d99"
-version = "0.7.1"
-
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
@@ -1606,12 +1519,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "94d180a6d2b5e55e447e2d27a29ed04fe79eb30c"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
 version = "1.6.38+0"
-
-[[deps.libsodium_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "848ab3d00fe39d6fbc2a8641048f8f272af1c51e"
-uuid = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
-version = "1.0.20+0"
 
 [[deps.libvorbis_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Ogg_jll", "Pkg"]
@@ -1649,23 +1556,21 @@ version = "0.9.1+5"
 # ╔═╡ Cell order:
 # ╟─38f92d79-4e85-4624-9c71-61321a6f19d0
 # ╟─a2eb4a00-f97f-4039-9e06-310b526d425e
-# ╠═99feaf54-05ed-11ec-0472-618993c00b94
+# ╟─99feaf54-05ed-11ec-0472-618993c00b94
 # ╠═40bc4a4e-a4d3-4226-a672-ed36cddbb7cf
-# ╠═083acdfd-3b3d-4586-952a-8a87aa3d1d3e
+# ╟─083acdfd-3b3d-4586-952a-8a87aa3d1d3e
 # ╠═d19215a4-20d0-40ad-a03a-c77ed3f91da9
-# ╠═04caeb3e-b89f-4657-87e8-17001fac32c3
 # ╟─ba096470-3f16-4085-a073-3c632d534623
-# ╠═a387a98f-b97e-4b62-a1d7-2289876df282
 # ╟─82e5b299-86bb-4493-b71e-5f15ac8fa2b4
-# ╠═28747c48-9771-489d-b010-d49c8c000270
+# ╟─28747c48-9771-489d-b010-d49c8c000270
 # ╟─73cc230d-71fa-4ac6-ab9c-046e97977343
-# ╠═b96a49f9-ba9f-4f58-9c45-43dc878861af
+# ╟─b96a49f9-ba9f-4f58-9c45-43dc878861af
 # ╠═5a6e813d-a7ff-4d6b-bf5d-943327beece9
 # ╠═e2b91f1b-216c-4561-b305-4aa60e676c1b
 # ╠═8f42aa9f-91c7-48e0-acb5-e28ff5a1a2a5
 # ╠═be890193-3cc1-43d7-be73-b0dedf997cd8
+# ╟─c6bfcff5-6f58-4e78-92e9-62e32b8f3037
 # ╠═16086eb6-f377-49b8-be91-07eb73bf1237
-# ╠═9159391c-59a9-47ba-a641-ea46b4286d55
 # ╠═ad707167-c141-49b8-b316-35173de7b41f
 # ╠═a1951bc2-9527-4524-b21d-78351bdeaa46
 # ╠═387496f2-b895-4cea-9608-8ded2a95b1a0
@@ -1676,27 +1581,25 @@ version = "0.9.1+5"
 # ╟─6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
 # ╠═334cb765-732c-4e7f-aad0-1c724f018b40
-# ╠═d2a9e86f-0752-4026-a580-5479a39d0f16
-# ╠═a292de07-c1e6-455d-af7a-758a25e3586a
-# ╠═e73901a0-e9d7-4076-bf40-02ade2a5e6ca
+# ╟─d2a9e86f-0752-4026-a580-5479a39d0f16
+# ╟─a292de07-c1e6-455d-af7a-758a25e3586a
+# ╟─e73901a0-e9d7-4076-bf40-02ade2a5e6ca
 # ╟─76c9c29e-31ed-4db7-b450-ef6a21b4a6df
 # ╠═61abe2ac-4b88-4936-885f-6fd24fc7f756
+# ╠═db9f4982-d7a1-4a96-816a-9e26148d7669
+# ╠═b1cf79c9-b702-4e14-aad7-466b615043ea
 # ╠═faff8194-bc69-4ead-8387-db7d4b536f71
 # ╠═4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 # ╠═1eefd855-a523-439b-b734-5021e9039921
 # ╠═1648c2d9-2ea2-4903-b480-07011fb5d5d3
 # ╠═9005a3da-36d5-4b41-8030-f8f843010638
-# ╠═97cfd917-d12f-415f-adbe-abf5af8e9267
-# ╠═d60338cb-5be7-4900-a9d9-63b458d1305e
-# ╠═5d88c349-a3d6-4ee7-844c-67fb2787dca8
-# ╠═d81a98c6-66e9-4e74-b419-c9b2ace9c218
-# ╠═0050fd35-755b-4ad5-a483-5b81c7fefbb9
-# ╠═b66ae1a4-40a3-43cb-b75a-5822c787a316
+# ╟─97cfd917-d12f-415f-adbe-abf5af8e9267
 # ╠═5962c23f-3828-4a98-bb42-373bee0c1331
 # ╟─0824c6dd-6c0a-44fc-9468-e97a851f1374
+# ╟─537c4737-9db9-4275-ae88-3ee34ce3d1c7
+# ╟─dc1f6a63-bd06-4bb7-86a3-68e9b1f594b6
 # ╠═9f2ec824-7c28-409f-8fa1-18f4ed71be11
-# ╠═2d97b001-c002-4d29-8925-8e6f16b2d77e
-# ╠═e360995e-c83b-471f-920c-7770ec9f05bc
+# ╠═203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 # ╠═e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
 # ╠═c1bef022-7062-4d68-a58f-3c9576c589cb
 # ╟─f07042d7-8c53-41d7-8468-ae1d05143626
