@@ -106,7 +106,7 @@ idx_tmp, rng_lim = extract2DSpectrogram(spec, i);
 @bind i_tim Slider(1:Nti; default=1, show_value=true)
 
 # ╔═╡ 4650239c-6898-4805-951f-755afe1a11a4
-@bind i_hgt Slider(80:30:4000; default=160, show_value=true) 
+@bind i_hgt Slider(80:30:6000; default=160, show_value=true) 
 
 # ╔═╡ e938435b-0b89-45d1-9a8b-5c45275baa53
 begin
@@ -129,14 +129,17 @@ findfirst(isapprox.(spec[:height][idx_alt], i_hgt, atol=14.9))
 # ╔═╡ d1230ba4-99ef-4def-a01a-a9513177b8dc
 spec[:spect_mask][idx_alt[46], i] +1
 
+# ╔═╡ 0a270485-c186-4055-b77a-7745dc9145fe
+
+
 # ╔═╡ b5d2f039-dcfb-4ce7-970f-41b42e8db95e
-function Spectra_NL(Zη::Matrix; p::Int=1)
+function Spectra_NL(spec::Dict; p::Int=1)
 	#p = Zη[:Nspec_ave][1]
-	
+	Zη = spec[:η_hh]
 	# Defining output variables:
 	Zη_cor = similar(Zη)
 	SNR_dB = similar(Zη)
-	
+
 	Nspec, Nsamples = size(Zη)
 	for idx ∈ 1:Nsamples
 		# spectral reflectivity in linear units:
@@ -191,12 +194,13 @@ function Spectra_NL(Zη::Matrix; p::Int=1)
 			NoisePeak = maximum(ηv[ii])
 			NoiseStdv = std(ηv[ii])
 		ηv[(ηv .≤ NoisePeak) .| isnan.(ηv)] .= Pnoise2
+			
 			#tmp[(tmp .≤ NoisePeak) .| isnan.(tmp)] .= Pnoise2
 		SNR = ηv/Pnoise2	
 			# Signal-to-noise-ratio:
 			#SNR = tmp./Pnoise2
 			
-			10log10.(ηv), 10log10.(SNR)
+			imfilter(10log10.(ηv),ker), 10log10.(SNR)
 		end
 		#Zη_cor[:, idx] = ηv
 		#SNR_dB[:, idx] = SNR
@@ -206,11 +210,11 @@ end
 
 
 # ╔═╡ a65ef708-f1ef-48a1-8773-da5a699156a2
-spec[:Znn], spec[:SNR_dB] = Spectra_NL(spec[:η_hh]; p=1);
+spec[:Znn], spec[:SNR_dB] = Spectra_NL(spec; p=1);
 
 # ╔═╡ 8b56d483-69d2-4bfd-8fa5-8d32e58a2749
 #heatmap(spec[:vel_nn], [87:200], spec[:Znn][:,87:200]', color=:lapaz)
-heatmap(spec[:vel_nn], 1f-3spec[:height], extract2DSpectrogram(spec, i, var=:SNR_dB), color=:berlin, ylim=(0, 9))
+heatmap(spec[:vel_nn], 1f-3spec[:height], extract2DSpectrogram(spec, i, var=:Znn), color=:berlin, ylim=(0, 9))
 
 # ╔═╡ c10002de-cc57-41e5-a157-cb4ebc134506
 begin
@@ -737,6 +741,12 @@ git-tree-sha1 = "f6250b16881adf048549549fba48b1161acdac8c"
 uuid = "c1c5ebd0-6772-5130-a774-d5fcae4a789d"
 version = "3.100.1+0"
 
+[[LERC_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "bf36f528eec6634efc60d7ec062008f171071434"
+uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
+version = "3.0.0+1"
+
 [[LZO_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "e5b909bcf985c5e2605737d2ce278ed791b89be6"
@@ -814,10 +824,10 @@ uuid = "4b2f31a3-9ecc-558c-b454-b3730dcb73e9"
 version = "2.35.0+0"
 
 [[Libtiff_jll]]
-deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Pkg", "Zlib_jll", "Zstd_jll"]
-git-tree-sha1 = "340e257aada13f95f98ee352d316c3bed37c8ab9"
+deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "LERC_jll", "Libdl", "Pkg", "Zlib_jll", "Zstd_jll"]
+git-tree-sha1 = "c9551dd26e31ab17b86cbd00c2ede019c08758eb"
 uuid = "89763e89-9b03-5906-acba-b20f662cd828"
-version = "4.3.0+0"
+version = "4.3.0+1"
 
 [[Libuuid_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1457,7 +1467,8 @@ version = "0.9.1+5"
 # ╠═ebb366ec-d1ca-46e5-9f84-06b7531745f8
 # ╠═d1230ba4-99ef-4def-a01a-a9513177b8dc
 # ╠═f329f96b-b09c-4568-b86e-be145e338bfc
-# ╟─b5d2f039-dcfb-4ce7-970f-41b42e8db95e
+# ╠═0a270485-c186-4055-b77a-7745dc9145fe
+# ╠═b5d2f039-dcfb-4ce7-970f-41b42e8db95e
 # ╠═a65ef708-f1ef-48a1-8773-da5a699156a2
 # ╠═8b56d483-69d2-4bfd-8fa5-8d32e58a2749
 # ╠═c10002de-cc57-41e5-a157-cb4ebc134506

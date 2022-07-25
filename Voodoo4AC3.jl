@@ -127,7 +127,7 @@ function adapt_RadarData(spec::Dict;
                          var::Symbol=:Znn,
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                          TIME_STEP::Int = 30,
-                         Δs::Int = 1,
+                         Δs::Int = 5,
                          MaxHkm::Float64 = 8.0,
                          adjustDoppler = false)
     
@@ -164,8 +164,8 @@ function adapt_RadarData(spec::Dict;
     n_rg = findlast(≤(MaxHkm), 1f-3spec[:height]); #250
 
     # * Number of samples:
-    #n_samples = filter(≥(0), spec[:spect_mask][1:n_rg, idx_ts]) |> length
-    n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
+    n_samples = filter(≥(0), spec[:spect_mask][1:n_rg, idx_ts]) |> length
+    #n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
 
     # * Number of Doppler spectral bins dimension (voodoo only support 256):
     n_vel = 256  # length(spec[:vel_nn])
@@ -173,7 +173,7 @@ function adapt_RadarData(spec::Dict;
     ## 3.1) ++++
     # Creating the features output array:
     # according to voodoo predictor, should be (n_samples, n_ch=1, n_ts=6, n_vel)
-    features = fill(NaN, (n_samples, 1, 6, n_vel))
+    features = fill(NaN32, (n_samples, 1, 6, n_vel))
 
     # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
     fuzzydat = PermutedDimsArray(features, (4, 1, 2, 3))
@@ -186,15 +186,30 @@ function adapt_RadarData(spec::Dict;
     # Filling feature array with 6 consecutive spectra centered at cln_time:
     n_ts = length(spec[:time])
 
-    foreach(enumerate(range(-2Δs, step=Δs, length=6))) do (k, δts)
-        idx_in = @. min(n_ts, max(1, (idx_ts + δts)))
-        
-        dat_in = spec[:spect_mask][1:n_rg, idx_in] .≥ 0
-        tmp_spec = spec[:spect_mask][1:n_rg, idx_in][dat_in] .+ 1
-        tmp_dat = dat_in[:]
-        fuzzydat[idx_voo, tmp_dat, 1, k] = spec[var][idx_rad, tmp_spec]
-        
+    foreach(idx_ts) do k
+        len_in = findall(≥(0), spec[:spect_mask][1:n_rg, k])
+        i0 = findfirst(isnan, fuzzydat[128,:,1,3])  #(i-1)*len_in + 1
+        i1 = i0 + length(len_in) -1
+
+        δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(n_ts, max.(1, x))
+
+        foreach(enumerate(δts)) do (j, its)
+            dat_in = spec[:spect_mask][len_in, its] .+ 1
+            # dummy (256, len_in)
+            dummy = hcat(map(x->x≠0 ? spec[var][idx_rad, x] : fill(NaN32, length(idx_rad)), dat_in)...)
+            fuzzydat[idx_voo, i0:i1, 1, j] = dummy
+        end
     end
+
+    ##foreach(enumerate(range(-2Δs, step=Δs, length=6))) do (k, δts)
+    ##    idx_in = @. min(n_ts, max(1, (idx_ts + δts)))
+    ##    
+    ##    dat_in = spec[:spect_mask][1:n_rg, idx_in] .≥ 0
+    ##    tmp_spec = spec[:spect_mask][1:n_rg, idx_in][dat_in] .+ 1
+    ##    tmp_dat = dat_in[:]
+    ##    fuzzydat[idx_voo, tmp_dat, 1, k] = spec[var][idx_rad, tmp_spec]
+    ##    
+    ##end
 
     # 3.3) ++++ creating output variables:
     # defining output array: masked

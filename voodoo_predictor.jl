@@ -95,13 +95,13 @@ md"""
 begin
 	# defining date and time to analyze:
 	yy = 2020 #2019
-	mm = 02 #01
-	dd = 06 #01
+	mm = 04 #01
+	dd = 15 #01
 	hh = 19 #04
 	
 	# defining Site information:
 	const SITE = "arctic-mosaic" # or "utqiagvik-nsa"
-	const PRODUCT = "KAZR/GE" # "MWACR"  # or 
+	const PRODUCT = "MWACR"  # "KAZR/GE" #"MWACR"  #  or 
 
 	# defining Directory paths:
 	const BASE_PATH = joinpath(homedir(), "LIM/data") #remsens") #
@@ -112,7 +112,7 @@ end
 begin
     spec_file = ARMtools.getFilePattern(PATH_DATA, "$(PRODUCT)/SPECCOPOL", yy, mm, dd; hh=hh)
     !isfile(spec_file) && error("spectrum data does not exist!")    
-    spec = ARMtools.readSPECCOPOL(spec_file[1]);
+    spec = ARMtools.readSPECCOPOL(typeof(spec_file)<:Vector ? spec_file[1] : spec_file);
 end;
 
 # ╔═╡ 8f42aa9f-91c7-48e0-acb5-e28ff5a1a2a5
@@ -161,9 +161,6 @@ begin
     end
 end;
 
-# ╔═╡ a1951bc2-9527-4524-b21d-78351bdeaa46
-kk=ARMtools.:raw_to_β(lidar[:β_raw], lidar[:SNR], lidar[:height]);
-
 # ╔═╡ 387496f2-b895-4cea-9608-8ded2a95b1a0
 # idx_ts is the index of spectrum time matching proxy cloudnet time
 begin
@@ -186,7 +183,7 @@ Select spectrum variable to use: $(@bind spec_var Select([:Znn, :SNR]))
 """
 
 # ╔═╡ ea93b55b-4081-4215-abd2-c1b1dde7fd84
-spec_params = Dict(:Znn=>(-100, 5), :SNR=>(0, 100));
+spec_params = Dict(:Znn=>(-100, -5), :SNR=>(0, 70));
 
 # ╔═╡ 6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 md"""
@@ -195,7 +192,7 @@ md"""
 
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
 begin
-    XdB = voodoo.adapt_RadarData(spec, NORMALIZE=false, var=spec_var, Δs=3); #cln_time = clnet[:time][clnet_it],
+    XdB = voodoo.adapt_RadarData(spec, NORMALIZE=false, var=spec_var, Δs=1); #cln_time = clnet[:time][clnet_it],
     masked = XdB[:masked]
     i_ts = XdB[:idx_ts];
 end;
@@ -204,10 +201,15 @@ end;
 nrg, nts = size(masked);
 
 # ╔═╡ d2a9e86f-0752-4026-a580-5479a39d0f16
-I2d =  @bind att Slider(1:length(i_ts); default=30, show_value=true) #1:length(spec[:time])
+begin
+	I2d =  @bind att Slider(1:length(i_ts); default=30, show_value=true)
+	H2d = @bind ahh Slider(1:length(spec[:height][1:nrg]); default=10, show_value=true)
+end;
 
 # ╔═╡ a292de07-c1e6-455d-af7a-758a25e3586a
-H2d = @bind ahh Slider(1:length(spec[:height][1:nrg]); default=10, show_value=true)
+md"""
+time index = $(I2d) _____ height index = $(H2d) ___ Show Altitude indicator: $(@bind Hx CheckBox(default=true))
+"""
 
 # ╔═╡ e73901a0-e9d7-4076-bf40-02ade2a5e6ca
 # converting Sliders values into indexes for spectrum extraction:
@@ -221,14 +223,6 @@ begin
 	# Index for the first dimension of X_in (n_samples, 1, 6 , n_vel):
 	idx_pre = (att-1)nrg + ahh
 end;
-
-# ╔═╡ 76c9c29e-31ed-4db7-b450-ef6a21b4a6df
-md"""
-Show Altitude indicator: $(@bind Hx CheckBox(default=true))
-"""
-
-# ╔═╡ db9f4982-d7a1-4a96-816a-9e26148d7669
-spec[:time][[1, end]]
 
 # ╔═╡ 4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 begin
@@ -309,10 +303,9 @@ Show time, height indicators: $(@bind THx CheckBox(default=true))
 """
 
 # ╔═╡ 537c4737-9db9-4275-ae88-3ee34ce3d1c7
-I2d
-
-# ╔═╡ dc1f6a63-bd06-4bb7-86a3-68e9b1f594b6
-H2d
+md"""
+time index = $(I2d) _____ height index = $(H2d)
+"""
 
 # ╔═╡ 9f2ec824-7c28-409f-8fa1-18f4ed71be11
 begin
@@ -332,7 +325,7 @@ begin
 	cs1.colors.colors[1] = RGB{Float64}(.7, .7, .7)
 	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,2], clim=(.5, 1), color=cs1,
 		title="cloud-droplets detection", xticks=(tm_tick, str_tick));
-	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true, ytickfontsize=8)
+	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ylim=(0, 15), ymirror=true, ytickfontsize=8)
 
 	THx && vline!([spec[:time][tline]], c=:red1, l=:dash, label=false);
 	THx && hline!([1f-3spec[:height][ahh]], c=:red1, l=:dash, label=false);
@@ -349,9 +342,9 @@ end
 
 # ╔═╡ e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
 begin
-	lid1 = heatmap(lidar[:time], 1f-3lidar[:height], log10.(β), ylim=(0, 4), clim=(-7, -3)); #clim=(0, .23));
-	lid2 = heatmap(clnet[:time], 1f-3clnet[:height], log10.(clnet[:β]), ylim=(0, 4), clim=(-7, -3));
-	plot(lid1, lid2, layout=(2,1))
+	lid1 = heatmap(lidar[:time], 1f-3lidar[:height], log10.(β), ylim=(0, 4), clim=(-7, -3), title="HSRL"); #clim=(0, .23));
+	lid2 = heatmap(clnet[:time], 1f-3clnet[:height], log10.(clnet[:β]), ylim=(0, 4), clim=(-7, -3), title="polyXT");
+	plot(lid1, lid2, layout=(2,1), size=(900,500))
 end
 
 # ╔═╡ f07042d7-8c53-41d7-8468-ae1d05143626
@@ -394,7 +387,7 @@ manifest_format = "2.0"
 
 [[deps.ARMtools]]
 deps = ["Dates", "NCDatasets", "Printf", "Statistics", "Test", "Wavelets"]
-git-tree-sha1 = "377f2cc6c0ca254fdc048ca7fcb17700ef87c631"
+git-tree-sha1 = "f10239485ff971e7c6b4074bb9ddb04f8ae61a7e"
 repo-rev = "main"
 repo-url = "/home/psgarfias/LIM/repos/ARMtools.jl"
 uuid = "04fa4220-f7a9-42e2-a909-1083f698c312"
@@ -1127,9 +1120,9 @@ version = "1.93.1"
 
 [[deps.Qt5Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Pkg", "Xorg_libXext_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "xkbcommon_jll"]
-git-tree-sha1 = "ad368663a5e20dbb8d6dc2fddeefe4dae0781ae8"
+git-tree-sha1 = "c6c0f690d0cc7caddb74cef7aa847b824a16b256"
 uuid = "ea2cea3b-5b76-57ae-a6ef-0a8af62496e1"
-version = "5.15.3+0"
+version = "5.15.3+1"
 
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
@@ -1558,7 +1551,6 @@ version = "0.9.1+5"
 # ╟─c6bfcff5-6f58-4e78-92e9-62e32b8f3037
 # ╠═16086eb6-f377-49b8-be91-07eb73bf1237
 # ╠═ad707167-c141-49b8-b316-35173de7b41f
-# ╠═a1951bc2-9527-4524-b21d-78351bdeaa46
 # ╠═387496f2-b895-4cea-9608-8ded2a95b1a0
 # ╠═be7b6cc2-3099-4836-b53d-2e94f098810e
 # ╠═b759e73a-e050-4d66-b65a-9292ebf4d10e
@@ -1570,9 +1562,7 @@ version = "0.9.1+5"
 # ╟─d2a9e86f-0752-4026-a580-5479a39d0f16
 # ╟─a292de07-c1e6-455d-af7a-758a25e3586a
 # ╟─e73901a0-e9d7-4076-bf40-02ade2a5e6ca
-# ╟─76c9c29e-31ed-4db7-b450-ef6a21b4a6df
-# ╠═61abe2ac-4b88-4936-885f-6fd24fc7f756
-# ╠═db9f4982-d7a1-4a96-816a-9e26148d7669
+# ╟─61abe2ac-4b88-4936-885f-6fd24fc7f756
 # ╠═4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 # ╠═1eefd855-a523-439b-b734-5021e9039921
 # ╠═1648c2d9-2ea2-4903-b480-07011fb5d5d3
@@ -1581,7 +1571,6 @@ version = "0.9.1+5"
 # ╠═5962c23f-3828-4a98-bb42-373bee0c1331
 # ╟─0824c6dd-6c0a-44fc-9468-e97a851f1374
 # ╟─537c4737-9db9-4275-ae88-3ee34ce3d1c7
-# ╟─dc1f6a63-bd06-4bb7-86a3-68e9b1f594b6
 # ╠═9f2ec824-7c28-409f-8fa1-18f4ed71be11
 # ╠═203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 # ╠═e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3

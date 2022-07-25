@@ -18,7 +18,7 @@ dd = 15 #01
 	
 # defining Site information:
 SITE = "arctic-mosaic" # or "utqiagvik-nsa"
-PRODUCT = "MWACR"  #"KAZR" # or "KAZR"
+PRODUCT = "KAZR/GE" #"MWACR"  # or "KAZR"
 
 # defining Directory paths:
 const BASE_PATH = joinpath(homedir(), "LIM/data") #remsens")
@@ -27,7 +27,7 @@ const PROD_TYPE = "$(PRODUCT)/SPECCOPOL"
 const OUTDAT_PATH = joinpath(pwd(), "data", @sprintf("%02d/%02d/%02d", yy, mm, dd))
 
 # Limits for normalization based on variable:
-spec_params = Dict(:Znn=>(-100, -30), :SNR=>(0, 45));
+spec_params = Dict(:Znn=>(-100, -5), :SNR=>(0, 70));
 spec_var = :Znn
 
 # Reading CloudNet data input:
@@ -35,10 +35,13 @@ const CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
 const clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
 clnet = CloudnetTools.readCLNFile(clnet_file);
 
+# Reading all available files for the day:
+#spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=hh)
+files_of_day = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd)
 
 # running over hours:
-for hh in (18:23) #04
-    spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=hh)
+for spec_file ∈ files_of_day #hh in (18:23) #04
+    
     !isfile(spec_file) && (warn("spectrum data does not exist!"); )
 
     spec = ARMtools.readSPECCOPOL(spec_file);
