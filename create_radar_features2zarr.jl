@@ -5,16 +5,19 @@
 using ARMtools
 using Dates
 using Printf
-#using Zarr
 using CloudnetTools
 
 include("Voodoo4AC3.jl")
 
 # defining date and time to analyze:
-yy = 2020 #2019
-mm = 04 #01
-dd = 15 #01
+years = (2020) #2019
+months = (04) #01
+days = (15) #01
 
+!isempty(ARGS) && foreach(ARGS) do in
+    ex = Meta.parse(in)
+    eval(ex)
+end
 	
 # defining Site information:
 SITE = "arctic-mosaic" # or "utqiagvik-nsa"
@@ -24,77 +27,99 @@ PRODUCT = "KAZR/GE" #"MWACR"  # or "KAZR"
 const BASE_PATH = joinpath(homedir(), "LIM/data") #remsens")
 const PATH_DATA = joinpath(BASE_PATH, SITE) #"LIM/remsens/utqiagvik-nsa/KAZR")
 const PROD_TYPE = "$(PRODUCT)/SPECCOPOL"
-const OUTDAT_PATH = joinpath(pwd(), "data", @sprintf("%02d/%02d/%02d", yy, mm, dd))
+const CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
 
 # Limits for normalization based on variable:
-spec_params = Dict(:Znn=>(-100, -5), :SNR=>(0, 70));
+spec_params = Dict(:Znn=>(-100, -10), :SNR=>(0, 70));
 spec_var = :Znn
 
-# Reading CloudNet data input:
-const CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
-const clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
-clnet = CloudnetTools.readCLNFile(clnet_file);
+for yy ∈ years
+    for mm ∈ months
+        for dd ∈ days
 
-# Reading all available files for the day:
-spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=6)
-#files_of_day = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd)
+            # DATE dependent parameters:
+            local OUTDAT_PATH = joinpath(pwd(), "data", @sprintf("%02d/%02d/%02d", yy, mm, dd))
 
-# running over hours:
-#for spec_file ∈ files_of_day #hh in (18:23) #04
-    
-    !isfile(spec_file) && (warn("spectrum data does not exist!"); )
+            # Reading CloudNet data input:
+            local clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
+            clnet = CloudnetTools.readCLNFile(clnet_file);
 
-    spec = ARMtools.readSPECCOPOL(spec_file);
+            # Reading all available files for the day:
+            #spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=6)
+            files_of_day = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=6)
 
-    # indexes vector containing Cloudnet data corresponding to the spectra time vector:
-    clnet_it = @. spec[:time][1] ≤ clnet[:time] ≤ spec[:time][end];
+            # running over hours:
+            #for spec_file ∈ files_of_day #hh in (18:23) #04
+            let spec_file=files_of_day
+                !isfile(spec_file) && (warn("spectrum data does not exist!"); )
 
-#XdB, masked, i_ts = 
-XdB = voodoo.adapt_RadarData(spec,
-                             cln_time=clnet[:time][clnet_it],
-                             var=spec_var,
-                             MaxHkm=11.0,
-                             Δs=3);
+                spec = ARMtools.readSPECCOPOL(spec_file);
+
+                # indexes vector containing Cloudnet data corresponding to the spectra time vector:
+                #clnet_it = @. spec[:time][1] ≤ clnet[:time] ≤ spec[:time][end];
+
+                # XdB is Dict with adapted feature, mask and index of spec time to cloudnet:
+                XdB = voodoo.adapt_RadarData(spec,
+                                             cln_time=clnet[:time],
+                                             var=spec_var,
+                                             MaxHkm=10.0,
+                                             Δs=3,
+                                             norm_params=spec_params);
+
+                # Creating output zarr file name:
+                zfilen = let fn = basename(spec_file)
+                    replace(fn, "M1.a1."=>".voodoo_$(spec_var).",
+                            ".nc"=>".zarr") |> x-> joinpath(OUTDAT_PATH, x)
+                end
+
+                voodoo.to_zarr(XdB, clnet, zfilen)
+
+            end # end over hour
+        end
+    end
+end
 
 
-    # Normalization of spectral data:
+# Normalization of spectral data:
     #X = voodoo.η₀₁(XdB[:,:,:,1:2:end], ηlim = spec_params[spec_var]);
-X = voodoo.η₀₁(XdB[:feature], ηlim = spec_params[spec_var]);
-    # Calling the predictor:
-sizedims = size(XdB[:feature])
-n_samples, _, n_spec, n_velocity = sizedims;
-n_rg, n_ts = size(XdB[:masked])
-    ##predict_var = voodoo.MakePrediction(X, sizeout=sizedims);
+    #X = voodoo.η₀₁(XdB[:feature], ηlim = spec_params[spec_var]);
 
-    # Saving the output predicted array
-
-## TRYING with PyCall
-using PyCall
-xr = pyimport("xarray")
-da = pyimport("dask.array")
-
-## Converting Julia variables to dask:
-## ***** For N-D variales ***********
-FeaturesArray = let tmp = dropdims(X; dims=2)
-    features = PermutedDimsArray(tmp, (1,3,2))
-    da.from_array(features, chunks = (floor(n_samples/4), floor(n_velocity/4), 2));
-end
-XdB[:targets] = let idx_dat = findall(==(1), XdB[:masked])
-    clnet[:CLASSIFY][1:n_rg, clnet_it][idx_dat]
-end
-
-# seconds from start of day:
-ts = datetime2unix.(clnet[:time][clnet_it]);
-
-# *** coordinates info:
-infoND_coor = Dict(
-    :dt => clnet[:time][clnet_it],
-    :nchannels => collect(Int64, 0:5),
-    :nsamples => collect(Int64, range(0, stop=n_samples-1)),
-    :nvelocity => collect(Int64, range(0, stop=n_velocity-1)),
-    :rg => clnet[:height][1:n_rg], #[3:3+n_rg-1],
-    :ts => ts,
-);
+ #   # Defining size for Zarr file dimentions:
+ #   sizedims = size(XdB[:feature])
+ #   n_samples, _, n_spec, n_velocity = sizedims;
+ #   n_rg, n_ts = size(XdB[:masked])
+ #   ##predict_var = voodoo.MakePrediction(X, sizeout=sizedims);
+ #
+ #   # *******************************************************
+ #   # Saving the data as zarr file:
+ #
+ #   ## TRYING with PyCall
+ #   using PyCall
+ #   xr = pyimport("xarray")
+ #   da = pyimport("dask.array")
+ #
+ #   ## Converting Julia variables to dask:
+ #   ## ***** For N-D variales ***********
+ #   FeaturesArray = let tmp = dropdims(X; dims=2)
+ #       features = PermutedDimsArray(tmp, (1,3,2))
+ #       da.from_array(features, chunks = (floor(n_samples/4), floor(n_velocity/4), 2));
+ #   end
+ #   XdB[:targets] = let idx_dat = findall(==(1), XdB[:masked])
+ #       clnet[:CLASSIFY][1:n_rg, clnet_it][idx_dat]
+ #   end
+ #
+ #   # seconds from start of day:
+ #   ts = datetime2unix.(clnet[:time][clnet_it]);
+ #
+ #   # *** coordinates info:
+ #   infoND_coor = Dict(
+ #       :dt => clnet[:time][clnet_it],
+ #       :nchannels => collect(Int64, 0:5),
+ #       :nsamples => collect(Int64, range(0, stop=n_samples-1)),
+ #       :nvelocity => collect(Int64, range(0, stop=n_velocity-1)),
+ #       :rg => clnet[:height][1:n_rg], #[3:3+n_rg-1],
+ #       :ts => ts,
+ #   );
 ##,Dimensions:    (ts: 120, rg: 292, dt: 120, nsamples: 15216, nvelocity: 256,
 ##,                nchannels: 6)
 ##,Coordinates:
@@ -107,15 +132,15 @@ infoND_coor = Dict(
 
 
 # *** variables info:
-convertCLNET2dask(A) = da.from_array(PermutedDimsArray(eltype(A)<:Bool ? A : Int32.(A), (2,1)) )
-
-infoND_vars = Dict(
-    :class => ([:ts, :rg], convertCLNET2dask(clnet[:CLASSIFY][1:n_rg, clnet_it]) ),
-    :features => ([:nsamples, :nvelocity, :nchannels], FeaturesArray),
-    :masked => ([:ts, :rg], convertCLNET2dask(.!XdB[:masked]) ),
-    :status => ([:ts, :rg], convertCLNET2dask(clnet[:DETECTST][1:n_rg, clnet_it]) ),
-    :targets => ([:nsamples], da.from_array(Float32.(XdB[:targets])) ),
-);
+#convertCLNET2dask(A) = da.from_array(PermutedDimsArray(eltype(A)<:Bool ? A : Int32.(A), (2,1)) )
+#
+#infoND_vars = Dict(
+#    :class => ([:ts, :rg], convertCLNET2dask(clnet[:CLASSIFY][1:n_rg, clnet_it]) ),
+#    :features => ([:nsamples, :nvelocity, :nchannels], FeaturesArray),
+#    :masked => ([:ts, :rg], convertCLNET2dask(.!XdB[:masked]) ),
+#    :status => ([:ts, :rg], convertCLNET2dask(clnet[:DETECTST][1:n_rg, clnet_it]) ),
+#    :targets => ([:nsamples], da.from_array(Float32.(XdB[:targets])) ),
+#);
 
 ##,Data variables:
 ##,    class      (ts, rg) int32 dask.array<chunksize=(120, 292), meta=np.ndarray>
@@ -125,17 +150,17 @@ infoND_vars = Dict(
 ##,    targets    (nsamples) float32 dask.array<chunksize=(15216,), meta=np.ndarray>
 
 # *** Attributes info:
-infoND_att = Dict(
-    :dt_unit       => "date",
-    :dt_unit_long  => "Datetime format",
-    :nchannels_unit=> "Number of stacked spectra",
-    :nsamples_unit => "Number of samples",
-    :nvelocity_unit=> "Number of velocity bins",
-    :rg_unit       => "m",
-    :rg_unit_long  => "Meter",
-    :ts_unit       => "sec",
-    :ts_unit_long  => "Unix time, seconds since Jan 1. 1970",
-);
+#infoND_att = Dict(
+#    :dt_unit       => "date",
+#    :dt_unit_long  => "Datetime format",
+#    :nchannels_unit=> "Number of stacked spectra",
+#    :nsamples_unit => "Number of samples",
+#    :nvelocity_unit=> "Number of velocity bins",
+#    :rg_unit       => "m",
+#    :rg_unit_long  => "Meter",
+#    :ts_unit       => "sec",
+#    :ts_unit_long  => "Unix time, seconds since Jan 1. 1970",
+#);
 
 ##,Attributes:
 ##,    dt_unit:         date
@@ -150,19 +175,16 @@ infoND_att = Dict(
 ##
 
 # Creating N-D XARRAY Dataset:
-ND_dataset = xr.Dataset(
-    data_vars = infoND_vars,
-    coords = infoND_coor,
-    attrs = infoND_att,
-);
+#ND_dataset = xr.Dataset(
+#    data_vars = infoND_vars,
+#    coords = infoND_coor,
+#    attrs = infoND_att,
+#);
 
-zfilen = let fn = basename(spec_file)
-    replace(fn, "M1.a1."=>".voodoo_$(spec_var).",
-            ".nc"=>".zarr") |> x-> joinpath(OUTDAT_PATH, x)
-end
+    
+#ND_dataset.to_zarr(store = zfilen, mode="w")
 
-ND_dataset.to_zarr(store = zfilen, mode="w")
-
+    # **** old stuff:
 #Zcompressor = Zarr.BloscCompressor(cname="zstd", clevel=3, shuffle=true)
     
 #    if isfile(zfilen)
@@ -178,6 +200,6 @@ ND_dataset.to_zarr(store = zfilen, mode="w")
 #Zₚᵣₑ[:,:,:,:] = FeaturesArray #predict_var[:,:,2];
 #end
     
-#end # end over hour
+
 
 # end of file

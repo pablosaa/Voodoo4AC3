@@ -123,13 +123,13 @@ OUTPUT:
 * idx_time::Vector{Int} -> indexes of the spec[:time] considered in output
 """
 function adapt_RadarData(spec::Dict;
-                         NORMALIZE::Bool=false,
                          var::Symbol=:Znn,
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                          TIME_STEP::Int = 30,
                          Δs::Int = 5,
                          MaxHkm::Float64 = 8.0,
-                         adjustDoppler = false)
+                         adjustDoppler = false,
+                         norm_params = nothing)
     
     ## 1) ++++
     # Correcting spectral reflectivity for noise level:
@@ -149,10 +149,12 @@ function adapt_RadarData(spec::Dict;
     else
         cln_time;
     end
+    # indexes containing Cloudnet data corresponding to the spectra time:
+    clnet_it = @. spec[:time][1] ≤ cln_time ≤ spec[:time][end];
 
     # input spectrum spec[:time] indexes to match cln_time time series:    
     idx_ts = let thr_ts = diff(spec[:time]) |> minimum
-        local tmp = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time]
+        tmp = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time[clnet_it]]
         filter(!isnothing, tmp)
     end
     # checking whether "nothing" is found in idx_ts (when nearest time is less than 2*thr)
@@ -168,7 +170,7 @@ function adapt_RadarData(spec::Dict;
     #n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
 
     # * Number of Doppler spectral bins dimension (voodoo only support 256):
-    n_vel = 256  # length(spec[:vel_nn])
+    n_vel = adjustDoppler ? 256 : length(spec[:vel_nn])
 
     ## 3.1) ++++
     # Creating the features output array:
@@ -180,7 +182,8 @@ function adapt_RadarData(spec::Dict;
 
     ## 3.2) ++++
     ## 3.2.1) ++++
-    idx_rad, idx_voo, Vn_voo = index4DopplerDims(spec[:vel_nn], adjust = adjustDoppler)
+    idx_rad, idx_voo, Vn_voo = index4DopplerDims(spec[:vel_nn],
+                                                 adjust = adjustDoppler)
 
     ## 3.2.2) ++++
     # Filling feature array with 6 consecutive spectra centered at cln_time:
@@ -195,7 +198,7 @@ function adapt_RadarData(spec::Dict;
 
         foreach(enumerate(δts)) do (j, its)
             dat_in = spec[:spect_mask][len_in, its] .+ 1
-            # dummy (256, len_in)
+            # dummy (n_vel, len_in)
             dummy = hcat(map(x->x≠0 ? spec[var][idx_rad, x] : fill(NaN32, length(idx_rad)), dat_in)...)
             fuzzydat[idx_voo, i0:i1, 1, j] = dummy
         end
@@ -217,17 +220,27 @@ function adapt_RadarData(spec::Dict;
 
     # 4) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
-    NORMALIZE && (features = voodoo.η₀₁(features))
+    if !isnothing(norm_params)
+        if typeof(norm_params)<:Tuple{Int, Int}
+            features = voodoo.η₀₁(features, ηlim = norm_params)
+        elseif typeof(norm_params)<:Dict && haskey(norm_params, var)
+            features = voodoo.η₀₁(features, ηlim = norm_params[var])
+        else
+            @warn "norm_params need to be Tuple{Int, Int} or Dict(:Znn=>()). Skipping normalization!"
+        end
+    end
+        
 
     # 5) ++++ Creating output Dictionary:
-    Xout = Dict(:feature=>features,
+    Xout = Dict(:features =>features,
                 :masked => masked,
-                :idx_ts => idx_ts)
+                :idx_ts => idx_ts,
+                :clnet_it => clnet_it)
     
     # 5.1) Checking if optional adjustment of Doppler spectrum is performed:
     adjustDoppler && merge(Xout, Dict(:νₙ => Vn_voo))
     
-    return Xout #features, masked, idx_ts
+    return Xout
     
 end
 # ----/
@@ -259,6 +272,7 @@ function index4DopplerDims(Vdp::Vector{<:AbstractFloat};
     V_limrad = adjust ? ARMtools.DopplerVelocityVector(υₙ, Nₙ) : Vdp
     ΔNy = extrema(Vdp)
     NNy = length(Vdp)
+    Nₙ = adjust ? Nₙ : length(Vdp)
     idx = adjust ? [findfirst(≥(x), V_limrad) for x ∈ ΔNy] : [1, Nₙ]
     Nidx = diff(idx) |> first
     Nidx += 1
@@ -267,6 +281,91 @@ function index4DopplerDims(Vdp::Vector{<:AbstractFloat};
     idxVnn = range(idx[1], stop=idx[2] , length=Nidx) .|> x->round(Int, x)
 
     return idxVdp, idxVnn, V_limrad
+end
+# ----/
+
+# **********************************************************
+"""
+Function to store the features Array as Zarr file for VOODOO
+training and predictions.
+"""
+function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
+
+    # Loading necessary packages:
+    xr = pyimport("xarray")
+    da = pyimport("dask.array")
+
+    # Defining size for Zarr file dimentions:
+    sizedims = size(Xin[:features])
+    n_samples, _, n_spec, n_velocity = sizedims;
+    n_rg, n_ts = size(Xin[:masked])
+
+    clnet_it = view(Xin[:clnet_it], :)
+    
+    ## Converting Julia variables to dask:
+    ## ***** For N-D variales ***********
+    FeaturesArray = let tmp = dropdims(Xin[:features]; dims=2)
+        features = PermutedDimsArray(tmp, (1,3,2))
+        da.from_array(features, chunks = (floor(n_samples/4), floor(n_velocity/4), 2));
+    end
+    
+    Xin[:targets] = let idx_dat = findall(==(1), Xin[:masked])
+        clnet[:CLASSIFY][1:n_rg, clnet_it][idx_dat]
+    end
+
+    
+    # Unix epoch seconds from start of day:
+    ts = datetime2unix.(clnet[:time][clnet_it]);
+
+    # *** coordinates info:
+    infoND_coor = Dict(
+        :dt => clnet[:time][clnet_it],
+        :nchannels => collect(Int64, 0:5),
+        :nsamples => collect(Int64, range(0, stop=n_samples-1)),
+        :nvelocity => collect(Int64, range(0, stop=n_velocity-1)),
+        :rg => clnet[:height][1:n_rg], #[3:3+n_rg-1],
+        :ts => ts,
+    );
+
+    # *** variables info:
+    clnetVAR2dask(A) = da.from_array(PermutedDimsArray(eltype(A)<:Bool ? A : Int32.(A), (2,1)) )
+
+    infoND_vars = Dict(
+        :class => ([:ts, :rg], clnetVAR2dask(clnet[:CLASSIFY][1:n_rg, clnet_it]) ),
+        :features => ([:nsamples, :nvelocity, :nchannels], FeaturesArray),
+        :masked => ([:ts, :rg], clnetVAR2dask(.!Xin[:masked]) ),
+        :status => ([:ts, :rg], clnetVAR2dask(clnet[:DETECTST][1:n_rg, clnet_it]) ),
+        :targets => ([:nsamples], da.from_array(Float32.(Xin[:targets])) ),
+    );
+
+    # *** Attributes info:
+    infoND_att = Dict(
+        :dt_unit       => "date",
+        :dt_unit_long  => "Datetime format",
+        :nchannels_unit=> "Number of stacked spectra",
+        :nsamples_unit => "Number of samples",
+        :nvelocity_unit=> "Number of velocity bins",
+        :rg_unit       => "m",
+        :rg_unit_long  => "Meter",
+        :ts_unit       => "sec",
+        :ts_unit_long  => "Unix time, seconds since Jan 1. 1970",
+    );
+
+    # *** Creating N-D XARRAY Dataset:
+    ND_dataset = xr.Dataset(
+        data_vars = infoND_vars,
+        coords = infoND_coor,
+        attrs = infoND_att,
+    );
+
+    # *** storing Dataset to zarr file:
+    try
+        ND_dataset.to_zarr(store = zfilen, mode="w")
+        return true
+    catch
+        @warn "Cannot create Zarr $zfilen"
+        return false
+    end
 end
 # ----/
 
