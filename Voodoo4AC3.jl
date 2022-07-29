@@ -114,20 +114,21 @@ INPUT:
 * var::Symbol -> spectrum variable to use, either :Znn (default) or :SNR
 * cln_time::Vector -> DateTime vector with values to consider as centered
 * Δs::Int -> step for filling the 6 spectra, default 1
-* MaxHkm::Float -> maximum altitude to consider in km, default 8km
+* LimHm::Tuple{Real, Real} -> (min, max) altitude to consider in m, default (0, 8000m)
 * TIME_STEP::Int -> if cln_time is not provided, a time vector is created 
 
 OUTPUT:
 * feature::Array{T}(num_samples, 1, 6, n_dopplervelocity) -> data array adapted
 * masked::Array{Bool}(num_time, num_heights) -> true for considered spectrum
 * idx_time::Vector{Int} -> indexes of the spec[:time] considered in output
+* idxrng::Vector{Int} -> indexes of spec[:height] considered in output
 """
 function adapt_RadarData(spec::Dict;
                          var::Symbol=:Znn,
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                          TIME_STEP::Int = 30,
                          Δs::Int = 5,
-                         MaxHkm::Float64 = 8.0,
+                         LimHm::Tuple{Real, Real} = (0.0, 8f3),
                          adjustDoppler = false,
                          norm_params = nothing)
     
@@ -163,10 +164,11 @@ function adapt_RadarData(spec::Dict;
     ## 3.1) ++++
     # Definition of dimension for output variables:
     # * Height dimension:
-    n_rg = findlast(≤(MaxHkm), 1f-3spec[:height]); #250
+    idxrng = @. LimHm[1] ≤ spec[:height] ≤ LimHm[2]
+    n_rg = findlast(idxrng) #≤(MaxHkm), 1f-3spec[:height]); #250
 
     # * Number of samples:
-    n_samples = filter(≥(0), spec[:spect_mask][1:n_rg, idx_ts]) |> length
+    n_samples = filter(≥(0), spec[:spect_mask][idxrng, idx_ts]) |> length
     #n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
 
     # * Number of Doppler spectral bins dimension (voodoo only support 256):
@@ -189,34 +191,27 @@ function adapt_RadarData(spec::Dict;
     # Filling feature array with 6 consecutive spectra centered at cln_time:
     n_ts = length(spec[:time])
 
-    foreach(idx_ts) do k
-        len_in = findall(≥(0), spec[:spect_mask][1:n_rg, k])
-        i0 = findfirst(isnan, fuzzydat[128,:,1,3])  #(i-1)*len_in + 1
-        i1 = i0 + length(len_in) -1
+    let i0 = 1
+        foreach(idx_ts) do k
+            len_in = findall(≥(0), spec[:spect_mask][idxrng, k])
+    
+            iall = range(i0, length=length(len_in) )
+        
+            δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(n_ts, max.(1, x))
 
-        δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(n_ts, max.(1, x))
-
-        foreach(enumerate(δts)) do (j, its)
-            dat_in = spec[:spect_mask][len_in, its] .+ 1
-            # dummy (n_vel, len_in)
-            dummy = hcat(map(x->x≠0 ? spec[var][idx_rad, x] : fill(NaN32, length(idx_rad)), dat_in)...)
-            fuzzydat[idx_voo, i0:i1, 1, j] = dummy
+            foreach(enumerate(δts)) do (j, its)
+                dat_in = spec[:spect_mask][idxrng, its][len_in] .+ 1
+                for (i, x) ∈ zip(iall, dat_in)
+                    x≠0 && (fuzzydat[idx_voo, i, 1, j] = spec[var][idx_rad, x])
+                end
+            end
+            i0 += length(len_in) 
         end
     end
-
-    ##foreach(enumerate(range(-2Δs, step=Δs, length=6))) do (k, δts)
-    ##    idx_in = @. min(n_ts, max(1, (idx_ts + δts)))
-    ##    
-    ##    dat_in = spec[:spect_mask][1:n_rg, idx_in] .≥ 0
-    ##    tmp_spec = spec[:spect_mask][1:n_rg, idx_in][dat_in] .+ 1
-    ##    tmp_dat = dat_in[:]
-    ##    fuzzydat[idx_voo, tmp_dat, 1, k] = spec[var][idx_rad, tmp_spec]
-    ##    
-    ##end
-
+    
     # 3.3) ++++ creating output variables:
     # defining output array: masked
-    masked = @. ifelse(spec[:spect_mask][1:n_rg, idx_ts] ≥ 0, true, false)
+    masked = @. ifelse(spec[:spect_mask][idxrng, idx_ts] ≥ 0, true, false)
 
     # 4) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
@@ -235,6 +230,7 @@ function adapt_RadarData(spec::Dict;
     Xout = Dict(:features =>features,
                 :masked => masked,
                 :idx_ts => idx_ts,
+                :limrng => LimHm,
                 :clnet_it => clnet_it)
     
     # 5.1) Checking if optional adjustment of Doppler spectrum is performed:
@@ -300,7 +296,15 @@ function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
     n_samples, _, n_spec, n_velocity = sizedims;
     n_rg, n_ts = size(Xin[:masked])
 
+    # Vector{Bool} with indexes of considered spectrum time in cloudnet:
     clnet_it = view(Xin[:clnet_it], :)
+
+    # Vector{Bool} with indexes of considered heights: 
+    rng_it = let H = Xin[:limrng] .+ clnet[:alt]
+        H[1] .≤ clnet[:height] .≤ H[2]
+    end
+    
+    n_rg != sum(rng_it) && (@error "$n_rg, $(sum(rng_it)) of heigths not compatible!")
     
     ## Converting Julia variables to dask:
     ## ***** For N-D variales ***********
@@ -310,7 +314,7 @@ function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
     end
     
     Xin[:targets] = let idx_dat = findall(==(1), Xin[:masked])
-        clnet[:CLASSIFY][1:n_rg, clnet_it][idx_dat]
+        clnet[:CLASSIFY][rng_it, clnet_it][idx_dat]
     end
 
     
@@ -323,7 +327,7 @@ function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
         :nchannels => collect(Int64, 0:5),
         :nsamples => collect(Int64, range(0, stop=n_samples-1)),
         :nvelocity => collect(Int64, range(0, stop=n_velocity-1)),
-        :rg => clnet[:height][1:n_rg], #[3:3+n_rg-1],
+        :rg => clnet[:height][rng_it],
         :ts => ts,
     );
 

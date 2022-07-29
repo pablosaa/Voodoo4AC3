@@ -62,7 +62,7 @@ for yy ∈ years
                 XdB = voodoo.adapt_RadarData(spec,
                                              cln_time=clnet[:time],
                                              var=spec_var,
-                                             MaxHkm=10.0,
+                                             LimHm=(clnet[:height][1]-clnet[:alt] ,10f3),
                                              Δs=3,
                                              norm_params=spec_params);
 
