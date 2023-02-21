@@ -154,7 +154,7 @@ function adapt_RadarData(spec::Dict;
     clnet_it = @. spec[:time][1] ≤ cln_time ≤ spec[:time][end];
 
     # input spectrum spec[:time] indexes to match cln_time time series:    
-    idx_ts = let thr_ts = diff(spec[:time]) |> minimum
+    idx_ts = let thr_ts = diff(spec[:time]) |> x->min(x..., Millisecond(2500) )
         tmp = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time[clnet_it]]
         filter(!isnothing, tmp)
     end
@@ -202,7 +202,7 @@ function adapt_RadarData(spec::Dict;
             foreach(enumerate(δts)) do (j, its)
                 dat_in = spec[:spect_mask][idxrng, its][len_in] .+ 1
                 for (i, x) ∈ zip(iall, dat_in)
-                    x≠0 && (fuzzydat[idx_voo, i, 1, j] = spec[var][idx_rad, x])
+                    x≥1 && (fuzzydat[idx_voo, i, 1, j] = spec[var][idx_rad, x])
                 end
             end
             i0 += length(len_in) 

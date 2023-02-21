@@ -1,18 +1,19 @@
-#!/opt/julia-1.7.2/bin/julia
+#!/home/psgarfias/.local/bin/julia
 
 # script to create Zarr files with features for Voodoo training purposes:
 
 using ARMtools
 using Dates
 using Printf
-using CloudnetTools
+using CloudnetTools: readCLNFile
 
 include("Voodoo4AC3.jl")
 
 # defining date and time to analyze:
 years = (2020) #2019
-months = (04) #01
-days = (15) #01
+months = (2,3,4,11,12) #01
+days = (1:31) #01
+hours = ()
 
 !isempty(ARGS) && foreach(ARGS) do in
     ex = Meta.parse(in)
@@ -20,39 +21,72 @@ days = (15) #01
 end
 	
 # defining Site information:
-SITE = "arctic-mosaic" # or "utqiagvik-nsa"
+SITE = "utqiagvik-nsa" #"arctic-mosaic" # or 
 PRODUCT = "KAZR/GE" #"MWACR"  # or "KAZR"
 
 # defining Directory paths:
-const BASE_PATH = joinpath(homedir(), "LIM/data") #remsens")
+const BASE_PATH = "/projekt2/remsens/data_new/site-campaign" # joinpath(homedir(), "LIM/data")
 const PATH_DATA = joinpath(BASE_PATH, SITE) #"LIM/remsens/utqiagvik-nsa/KAZR")
 const PROD_TYPE = "$(PRODUCT)/SPECCOPOL"
-const CLNET_PATH = joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
+const B07_PATH  =  joinpath("/projekt2/ac3data/B07-data/", SITE, "CloudNet") 
+const CLNET_PATH = joinpath(B07_PATH, "output") #joinpath(homedir(), "LIM/data/CloudNet/arctic-mosaic/TROPOS")
+
+# === Spectra File name extension for NSA ===
+# NOTE: data type for spectra files:
+# * before ~june 2019 (a0 product) is fileext=".cdf"
+# * after ~june 2019 (a1 product) is fileext=".nc"
+const fnspecext = ".nc"  # ".cdf"
 
 # Limits for normalization based on variable:
 spec_params = Dict(:Znn=>(-100, -10), :SNR=>(0, 70));
 spec_var = :Znn
 
+println(now())
+
 for yy ∈ years
     for mm ∈ months
         for dd ∈ days
-
+            try
+                Date(yy,mm,dd) |> print
+            catch
+                continue
+            end
+            
             # DATE dependent parameters:
-            local OUTDAT_PATH = joinpath(pwd(), "data", @sprintf("%02d/%02d/%02d", yy, mm, dd))
+            local OUTDAT_PATH = joinpath(B07_PATH, "voodoo", @sprintf("%02d/%02d/%02d", yy, mm, dd))
 
             # Reading CloudNet data input:
-            local clnet_file = ARMtools.getFilePattern(CLNET_PATH, "categorize", yy, mm, dd);
-            clnet = CloudnetTools.readCLNFile(clnet_file);
+            local clnet_file = ARMtools.getFilePattern(CLNET_PATH, "CEIL10m", yy, mm, dd, fileext="categorize.nc");
+            isnothing(clnet_file) && continue
+
+            clnet = readCLNFile(clnet_file);
 
             # Reading all available files for the day:
+            files_of_day = let fn_tmp=String[]
+                if !isempty(hours)
+                    foreach(hours) do hr
+                        tmp = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=hr, fileext=fnspecext)
+                        !isnothing(tmp) && (tmp isa Vector ? push!(fn_tmp, tmp...) : push!(fn_tmp, tmp) )
+                    end
+                else
+                    tmp = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; fileext=fnspecext)
+                    !isnothing(tmp) && (tmp isa Vector ? push!(fn_tmp, tmp...) : push!(fn_tmp, tmp) )
+                end
+                fn_tmp
+            end
+
+            isempty(files_of_day) && (@warn "Empty list of spectra files :( Skipping!"; continue)
+
             #spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=6)
-            files_of_day = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=6)
+            #files_of_day = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; fileext=fnspecext)
 
             # running over hours:
-            #for spec_file ∈ files_of_day #hh in (18:23) #04
-            let spec_file=files_of_day
-                !isfile(spec_file) && (warn("spectrum data does not exist!"); )
-
+            for spec_file ∈ files_of_day 
+            #let spec_file=files_of_day
+            #for hr ∈ hours
+                #spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=hr, fileext=fnspecext)
+                !isfile(spec_file) && (@warn "spectrum data does not exist! $(spec_file)"; continue)
+                 
                 spec = ARMtools.readSPECCOPOL(spec_file);
 
                 # indexes vector containing Cloudnet data corresponding to the spectra time vector:
@@ -68,17 +102,23 @@ for yy ∈ years
 
                 # Creating output zarr file name:
                 zfilen = let fn = basename(spec_file)
-                    replace(fn, "M1.a1."=>".voodoo_$(spec_var).",
-                            ".nc"=>".zarr") |> x-> joinpath(OUTDAT_PATH, x)
+                    replace(fn, "M1.a1."=>".$(spec_var).",
+                            fnspecext=>".zarr") |> x-> joinpath(OUTDAT_PATH, x)
                 end
-
-                voodoo.to_zarr(XdB, clnet, zfilen)
+                
+                try
+                    voodoo.to_zarr(XdB, clnet, zfilen)
+                catch e
+                    @warn "voodoo to zarr failed at $(dd).$(mm).$(yy)! $(basename(spec_file))"
+                    println(e)
+                end
 
             end # end over hour
         end
     end
 end
 
+println(now())
 
 # Normalization of spectral data:
     #X = voodoo.η₀₁(XdB[:,:,:,1:2:end], ηlim = spec_params[spec_var]);
