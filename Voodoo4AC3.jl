@@ -10,7 +10,7 @@ using ARMtools
 
 # *******************************************************************
 function MakePrediction(X_in::Array{<:AbstractFloat, 4};
-                        sizeout::NTuple{2, Int} = (0,0))
+        masked = [])
     
     # loading python torch package:
     torch = pyimport("torch");
@@ -52,12 +52,22 @@ function MakePrediction(X_in::Array{<:AbstractFloat, 4};
     # Get model prediction converted to Julia array (via numpy):
     X_out = prediction.to(USEDEVICE).numpy();
 
-    predict_var = try
-        # Final output array with predictions (range x time):
-        reshape(X_out, (sizeout..., NCLASSES));
-    catch
-        X_out
-    end
+    # Final output array with predictions (range x time):
+    predict_var = let xy = size(masked)
+        if NCLASSES*sum(masked[:]) == (prod∘size)(X_out)
+                index_mask = reshape(cumsum(masked[:]), xy)
+	        AA = fill(NaN32, (xy..., NCLASSES))
+	        for i ∈ (1:xy[1])
+		        for j ∈ (1:xy[2])
+			        !masked[i,j] && continue
+			        AA[i,j,:] = X_out[index_mask[i,j], :]
+		        end
+	        end
+	        AA
+        else
+                X_out
+        end
+    end     
 
     return predict_var
 end
