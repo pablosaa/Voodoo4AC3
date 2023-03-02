@@ -90,9 +90,9 @@ All values outside the range min to max are set-up to 0 and 1.
 
 """
 function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim=())
-    (η0, η1) = if typeof(ηlim) <: NTuple{2, Int}
+    (η0, η1) = if typeof(ηlim) <: NTuple{2, Real}
         sort([ηlim...])
-    elseif typeof(ηlim) <: Int
+    elseif typeof(ηlim) <: Real
         (0, ηlim)
     elseif isempty(ηlim)
         extrema(η)
@@ -148,13 +148,30 @@ Function returns a Dictionary with following keys:
 * idxrng::Vector{Int} -> indexes of spec[:height] considered in output
 """
 function adapt_RadarData(spec::Dict;
-                         var::NamedTuple{(:Znn, :SNR), Tuple{Tuple{Int, Int}, Int}}=(Znn=(-90, -20), SNR=60),
+                         var::Dict = Dict(:Znn=>()), #NamedTuple{(:Znn, :SNR), Tuple{Tuple{Int, Int}, Int}}=(Znn=(-90, -20), SNR=60),
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                          Δs::Int = 5,
                          LimHm::Tuple{Real, Real} = (NaN32, NaN32),
-                         AdjustDoppler = false,
-                         Normalize = false)
+                         AdjustDoppler = false)
+                         
     
+    ## 0) +++
+    # Checking initialized variables:
+    Normalize = false
+    
+    if ~(!isempty(var[:Znn]) && (typeof(var[:Znn]) <: Tuple{Real, Real} ))
+        @warn "input variable var[:Znn] needs to be type Tuple(Real, Real). Ignored!"
+        var[:Znn] =()
+    else
+        Normalize = true
+    end
+    if haskey(var, :SNR) && !(typeof(var[:SNR]) <:Real )
+        @warn "input variable var[:SNR] need to be ::Real. Ignored!"
+        delete!(var, :SNR)
+    else
+        Normalize = true
+    end
+
     ## 1) ++++
     # Correcting spectral reflectivity for noise level:
     spec[:Znn], spec[:SNR] = if haskey(spec, :Nspec_ave)
