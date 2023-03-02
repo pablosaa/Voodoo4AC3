@@ -9,6 +9,11 @@ using Dates
 using ARMtools
 
 # *******************************************************************
+function MakePrediction(X_in::Dict; masked = [])
+    predict_var = Dict(k=> MakePrediction(v, masked=masked) for (k,v) ∈ X_in[:features])
+
+    return predict_var
+end
 function MakePrediction(X_in::Array{<:AbstractFloat, 4};
         masked = [])
     
@@ -84,9 +89,17 @@ for other min/max limit values e.g. -90 and -50.
 All values outside the range min to max are set-up to 0 and 1. 
 
 """
-function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim::NTuple{2, Int} = (-100, -40))
-    η0 = ηlim[1]
-    η1 = ηlim[2]
+function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim=())
+    (η0, η1) = if typeof(ηlim) <: NTuple{2, Int}
+        sort([ηlim...])
+    elseif typeof(ηlim) <: Int
+        (0, ηlim)
+    elseif isempty(ηlim)
+        extrema(η)
+    else
+        @error "ηlim needs to be (η₀, η₁) or η₁ or ()"
+    end
+    
     H_out = @. (η - η0)/(η1 - η0)
     @. H_out = min(1, H_out) # H_out[H_out > 1] = 1f0
     @. H_out = max(0, H_out) #[H_out < 0] = 0f0
@@ -116,31 +129,31 @@ for Voodoo predictor. This function perform the following tasks:
 USAGE:
 julia> feature, masked, idx_time = adapt_RadarData(spec)
 julia> feature, masked, idx_time = adapt_RadarData(spec, cln_time=cloudnet_time)
-julia> feature, masked, idx_time = adapt_RadarData(spec, var=:SNR, Δs=3)
+julia> feature, masked, idx_time = adapt_RadarData(spec, var=(Znn=(-100, -50), SNR=40), Δs=3)
 
 INPUT:
 * spec::Dict() -> Variable with spectrum data as returned from ARMtools.jl
-* NORMALIZE::Bool -> flag to normalize [0,1] the output. Default false
-* var::Symbol -> spectrum variable to use, either :Znn (default) or :SNR
+* var::NamedTuple (Znn=(min, max), SNR=max) -> spectrum variable with normalization ranges, (default) Znn=(-90,-20) & SNR=60
 * cln_time::Vector -> DateTime vector with values to consider as centered
-* Δs::Int -> step for filling the 6 spectra, default 1
+* Δs::Int -> step for filling the 6 spectra, default 5
 * LimHm::Tuple{Real, Real} -> (min, max) altitude to consider in m, default (0, 8000m)
-* TIME_STEP::Int -> if cln_time is not provided, a time vector is created 
+* AdjustDoppler::Bool -> true if Doppler spectrum adjusted to 256 Vooodoo default.
+* Normalize::Bool -> flag to normalize [0,1] the output. Default false
 
 OUTPUT:
-* feature::Array{T}(num_samples, 1, 6, n_dopplervelocity) -> data array adapted
+Function returns a Dictionary with following keys:
+* features::Dict(:Znn, :SNR) with Array{T}(num_samples, 1, 6, n_dopplervelocity) -> data array adapted
 * masked::Array{Bool}(num_time, num_heights) -> true for considered spectrum
 * idx_time::Vector{Int} -> indexes of the spec[:time] considered in output
 * idxrng::Vector{Int} -> indexes of spec[:height] considered in output
 """
 function adapt_RadarData(spec::Dict;
-                         var::Symbol=:Znn,
+                         var::NamedTuple{(:Znn, :SNR), Tuple{Tuple{Int, Int}, Int}}=(Znn=(-90, -20), SNR=60),
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
-                         TIME_STEP::Int = 30,
                          Δs::Int = 5,
-                         LimHm::Tuple{Real, Real} = (0.0, 8f3),
-                         adjustDoppler = false,
-                         norm_params = nothing)
+                         LimHm::Tuple{Real, Real} = (NaN32, NaN32),
+                         AdjustDoppler = false,
+                         Normalize = false)
     
     ## 1) ++++
     # Correcting spectral reflectivity for noise level:
@@ -153,66 +166,70 @@ function adapt_RadarData(spec::Dict;
 
     ## 2) ++++
     # if cloudnet time not provided then make time steps every TIME_STEP seconds:
-    cln_time = if isempty(cln_time)
-        let Δt = Dates.Second(TIME_STEP)
-            round(spec[:time][1], Δt):Δt:round(spec[:time][end], Δt)
-        end
-    else
-        cln_time;
-    end
     # indexes containing Cloudnet data corresponding to the spectra time:
-    clnet_it = @. spec[:time][1] ≤ cln_time ≤ spec[:time][end];
+    clnet_it = ifelse(isempty(cln_time), : , @. spec[:time][1] ≤ cln_time ≤ spec[:time][end])
 
-    # input spectrum spec[:time] indexes to match cln_time time series:    
-    idx_ts = let thr_ts = diff(spec[:time]) |> x->min(x..., Millisecond(2500) )
-        tmp = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time[clnet_it]]
-        filter(!isnothing, tmp)
+    # input spectrum spec[:time] indexes to match cln_time time series:
+    idx_ts=:;
+    
+    if !isempty(cln_time)
+        idx_ts = let thr_ts = diff(spec[:time]) |> x->min(x..., Millisecond(2500) )
+            tmp = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time[clnet_it]]
+            filter(!isnothing, tmp)
+        end
     end
     # checking whether "nothing" is found in idx_ts (when nearest time is less than 2*thr)
     idx_ts .|> isnothing |> any && error("Time steps larger than twice the threshold!!")
+    n_ts = length(spec[:time][idx_ts]);
+
     # -------------------------------
     ## 3.1) ++++
     # Definition of dimension for output variables:
     # * Height dimension:
-    idxrng = @. LimHm[1] ≤ spec[:height] ≤ LimHm[2]
-    n_rg = findlast(idxrng) #≤(MaxHkm), 1f-3spec[:height]); #250
+    idxrng = ifelse(map(isnan, LimHm) |> any, : ,  @. LimHm[1] ≤ spec[:height] ≤ LimHm[2])
+    n_rg = length(spec[:height][idxrng]) #findlast(idxrng) #≤(MaxHkm), 1f-3spec[:height]); #250
 
     # * Number of samples:
     n_samples = filter(≥(0), spec[:spect_mask][idxrng, idx_ts]) |> length
     #n_samples = length(spec[:spect_mask][1:n_rg, idx_ts])
 
     # * Number of Doppler spectral bins dimension (voodoo only support 256):
-    n_vel = adjustDoppler ? 256 : length(spec[:vel_nn])
+    n_vel = AdjustDoppler ? 256 : length(spec[:vel_nn])
 
     ## 3.1) ++++
     # Creating the features output array:
     # according to voodoo predictor, should be (n_samples, n_ch=1, n_ts=6, n_vel)
-    features = fill(NaN32, (n_samples, 1, 6, n_vel))
+    features = Dict(x=>fill(NaN32, (n_samples, 1, 6, n_vel)) for x in keys(var) )
 
     # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
-    fuzzydat = PermutedDimsArray(features, (4, 1, 2, 3))
-
+    fuzzydat = Dict(k=>PermutedDimsArray(features[k], (4, 1, 2, 3)) for k in keys(var))
+    
     ## 3.2) ++++
     ## 3.2.1) ++++
     idx_rad, idx_voo, Vn_voo = index4DopplerDims(spec[:vel_nn],
-                                                 adjust = adjustDoppler)
+                                                 adjust = AdjustDoppler)
 
     ## 3.2.2) ++++
     # Filling feature array with 6 consecutive spectra centered at cln_time:
-    n_ts = length(spec[:time])
 
     let i0 = 1
-        foreach(idx_ts) do k
+        NN = lastindex(spec[:time])
+        time_iter = ifelse(typeof(idx_ts) <: Colon, 1:n_ts , idx_ts)
+        foreach(time_iter) do k
             len_in = findall(≥(0), spec[:spect_mask][idxrng, k])
     
             iall = range(i0, length=length(len_in) )
         
-            δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(n_ts, max.(1, x))
+            δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(NN, max.(1, x))
 
             foreach(enumerate(δts)) do (j, its)
                 dat_in = spec[:spect_mask][idxrng, its][len_in] .+ 1
+                
                 for (i, x) ∈ zip(iall, dat_in)
-                    x≥1 && (fuzzydat[idx_voo, i, 1, j] = spec[var][idx_rad, x])
+                    x<1 && continue
+                    foreach(keys(var)) do kk
+                        fuzzydat[kk][idx_voo, i, 1, j] = spec[kk][idx_rad, x]
+                    end
                 end
             end
             i0 += length(len_in) 
@@ -225,17 +242,10 @@ function adapt_RadarData(spec::Dict;
 
     # 4) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
-    if !isnothing(norm_params)
-        if typeof(norm_params)<:Tuple{Int, Int}
-            features = voodoo.η₀₁(features, ηlim = norm_params)
-        elseif typeof(norm_params)<:Dict && haskey(norm_params, var)
-            features = voodoo.η₀₁(features, ηlim = norm_params[var])
-        else
-            @warn "norm_params need to be Tuple{Int, Int} or Dict(:Znn=>()). Skipping normalization!"
-        end
+    Normalize && foreach(pairs(var)) do (k,v)
+        haskey(features, k) && (features[k] = voodoo.η₀₁(features[k], ηlim = v))
     end
-        
-
+    
     # 5) ++++ Creating output Dictionary:
     Xout = Dict(:features =>features,
                 :masked => masked,
@@ -244,7 +254,7 @@ function adapt_RadarData(spec::Dict;
                 :clnet_it => clnet_it)
     
     # 5.1) Checking if optional adjustment of Doppler spectrum is performed:
-    adjustDoppler && merge(Xout, Dict(:νₙ => Vn_voo))
+    AdjustDoppler && merge(Xout, Dict(:νₙ => Vn_voo))
     
     return Xout
     
