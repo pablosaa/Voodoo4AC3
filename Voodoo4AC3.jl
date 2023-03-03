@@ -89,6 +89,11 @@ for other min/max limit values e.g. -90 and -50.
 All values outside the range min to max are set-up to 0 and 1. 
 
 """
+function η₀₁(η::Dict; ηlim=Dict())
+    thelims = Dict(k=>ifelse(haskey(ηlim,k), ηlim[k], () ) for (k,v) ∈ η)
+    H_out = Dict(k=>η₀₁(v; ηlim=thelims[k]) for (k,v) ∈ η)
+    return H_out
+end
 function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim=())
     (η0, η1) = if typeof(ηlim) <: NTuple{2, Real}
         sort([ηlim...])
@@ -148,29 +153,35 @@ Function returns a Dictionary with following keys:
 * idxrng::Vector{Int} -> indexes of spec[:height] considered in output
 """
 function adapt_RadarData(spec::Dict;
-                         var::Dict = Dict(:Znn=>()), #NamedTuple{(:Znn, :SNR), Tuple{Tuple{Int, Int}, Int}}=(Znn=(-90, -20), SNR=60),
+                  var = :Znn,     #NamedTuple{(:Znn, :SNR), Tuple{Tuple{Int, Int}, Int}}=(Znn=(-91, -20), SNR=60),
                          cln_time::Vector{DateTime} = Vector{DateTime}(undef,0),
                          Δs::Int = 5,
                          LimHm::Tuple{Real, Real} = (NaN32, NaN32),
-                         AdjustDoppler = false)
+                         AdjustDoppler = false,
+                         Normalize::Dict=Dict())
                          
     
     ## 0) +++
     # Checking initialized variables:
-    Normalize = false
-    
-    if ~(!isempty(var[:Znn]) && (typeof(var[:Znn]) <: Tuple{Real, Real} ))
-        @warn "input variable var[:Znn] needs to be type Tuple(Real, Real). Ignored!"
-        var[:Znn] =()
+    var = if typeof(var)<:Symbol || typeof(var)<:Vector{Symbol}
+        [v for v in var if haskey(spec,v)]
     else
-        Normalize = true
+        @warn "Optional variable var needs to be Symbol or Vector{Symbol}"
+        [:Znn]
     end
-    if haskey(var, :SNR) && !(typeof(var[:SNR]) <:Real )
-        @warn "input variable var[:SNR] need to be ::Real. Ignored!"
-        delete!(var, :SNR)
-    else
-        Normalize = true
-    end
+
+    #if ~(!isempty(var[:Znn]) && (typeof(var[:Znn]) <: Tuple{Real, Real} ))
+    #    @warn "input variable var[:Znn] needs to be type Tuple(Real, Real). Ignored!"
+    #    var[:Znn] =()
+    #else
+    #    Normalize = true
+    #end
+    #if haskey(var, :SNR) && !(typeof(var[:SNR]) <:Real )
+    #    @warn "input variable var[:SNR] need to be ::Real. Ignored!"
+    #    delete!(var, :SNR)
+    #else
+    #    Normalize = true
+    #end
 
     ## 1) ++++
     # Correcting spectral reflectivity for noise level:
@@ -216,10 +227,10 @@ function adapt_RadarData(spec::Dict;
     ## 3.1) ++++
     # Creating the features output array:
     # according to voodoo predictor, should be (n_samples, n_ch=1, n_ts=6, n_vel)
-    features = Dict(x=>fill(NaN32, (n_samples, 1, 6, n_vel)) for x in keys(var) )
+    features = Dict(x=>fill(NaN32, (n_samples, 1, 6, n_vel)) for x in var )
 
     # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
-    fuzzydat = Dict(k=>PermutedDimsArray(features[k], (4, 1, 2, 3)) for k in keys(var))
+    fuzzydat = Dict(k=>PermutedDimsArray(features[k], (4, 1, 2, 3)) for k in var)
     
     ## 3.2) ++++
     ## 3.2.1) ++++
@@ -244,7 +255,7 @@ function adapt_RadarData(spec::Dict;
                 
                 for (i, x) ∈ zip(iall, dat_in)
                     x<1 && continue
-                    foreach(keys(var)) do kk
+                    foreach(var) do kk
                         fuzzydat[kk][idx_voo, i, 1, j] = spec[kk][idx_rad, x]
                     end
                 end
@@ -259,7 +270,7 @@ function adapt_RadarData(spec::Dict;
 
     # 4) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
-    Normalize && foreach(pairs(var)) do (k,v)
+    !isempty(Normalize) && foreach(pairs(Normalize)) do (k,v)
         haskey(features, k) && (features[k] = voodoo.η₀₁(features[k], ηlim = v))
     end
     

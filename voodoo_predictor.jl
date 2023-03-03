@@ -206,26 +206,28 @@ spec[:Nspec_ave] = 5;
 
 # ╔═╡ 897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 md"""
-Select spectrum variable to use: $(@bind spec_var Select([:Znn, :SNR]))
+Select spectrum variable to use: $(@bind spec_var Select([:Znn=>"Reflectivity", :SNR=>"SignalToNoise", [:Znn, :SNR]=>"Both"]))
 """
 
 # ╔═╡ ea93b55b-4081-4215-abd2-c1b1dde7fd84
-spec_params = Dict(:Znn=>(-90, -10), :SNR=>(0, 60));
+spec_params = let D=Dict(:Znn=>(-90, -10), :SNR=>60)
+    typeof(spec_var)<:Vector ? D : D[spec_var]
+end;
 
 # ╔═╡ 6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 md"""
 #### Adapting Radar data to Voodoo input format and dimentions:
 """
 
-# ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
-begin
-    XdB = voodoo.adapt_RadarData(spec; var=spec_var, Δs=1); #cln_time = clnet[:time][clnet_it],
-    masked = XdB[:masked]
-    i_ts = XdB[:idx_ts];
-end;
+# ╔═╡ ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
+XdB = voodoo.adapt_RadarData(spec; var=spec_var); #cln_time = clnet[:time][clnet_it], Δs=1,
 
-# ╔═╡ 334cb765-732c-4e7f-aad0-1c724f018b40
-nrg, nts = size(masked);
+# ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
+begin 
+    masked = XdB[:masked]
+    i_ts = XdB[:idx_ts] |> I->ifelse(typeof(I)<:Colon, 1:lenth(spec[:time]), I);
+	nrg, nts = size(masked);
+end;
 
 # ╔═╡ d2a9e86f-0752-4026-a580-5479a39d0f16
 begin
@@ -253,7 +255,7 @@ end;
 
 # ╔═╡ 4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 begin
-    X = voodoo.η₀₁(XdB[:features], ηlim = spec_params[spec_var]); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
+    X = voodoo.η₀₁(XdB[:features], ηlim = spec_params); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
 end;
 
 # ╔═╡ 1eefd855-a523-439b-b734-5021e9039921
@@ -1778,8 +1780,8 @@ version = "1.4.1+0"
 # ╟─897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 # ╠═ea93b55b-4081-4215-abd2-c1b1dde7fd84
 # ╟─6cf59a76-fa76-4a42-bcf9-778cee6cd05f
+# ╠═ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
-# ╠═334cb765-732c-4e7f-aad0-1c724f018b40
 # ╟─d2a9e86f-0752-4026-a580-5479a39d0f16
 # ╟─a292de07-c1e6-455d-af7a-758a25e3586a
 # ╟─e73901a0-e9d7-4076-bf40-02ade2a5e6ca
