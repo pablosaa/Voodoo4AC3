@@ -195,7 +195,7 @@ begin
 	cln_time  = round(spec[:time][1], Second(TIME_STEP)):Second(TIME_STEP):round(spec[:time][end], Second(TIME_STEP))
 	thr_ts = minimum(diff(spec[:time]));
 	#idx_ts = map(x -> findfirst((abs.(x .- spec[:time])) .< 2thr_ts), cln_time) |> x->filter(!isnothing,x)
-	idx_ts = [findfirst(abs.(x .- spec[:time]) .< 2thr_ts) for x ∈ cln_time ]  |> x->filter(!isnothing,x)
+	idx_ts = [argmin(abs.(x .- clnet[:time])) for x ∈ spec[:time] ] # |> x->filter(!isnothing,x)
 	end;
 
 # ╔═╡ be7b6cc2-3099-4836-b53d-2e94f098810e
@@ -206,11 +206,11 @@ spec[:Nspec_ave] = 5;
 
 # ╔═╡ 897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 md"""
-Select spectrum variable to use: $(@bind spec_var Select([:Znn=>"Reflectivity", :SNR=>"SignalToNoise", [:Znn, :SNR]=>"Both"]))
+Select spectrum variable to use: $(@bind spec_var Select([[:Znn]=>"Reflectivity", [:SNR]=>"SignalToNoise", [:Znn, :SNR]=>"Both"]))
 """
 
 # ╔═╡ ea93b55b-4081-4215-abd2-c1b1dde7fd84
-spec_params = let D=Dict(:Znn=>(-90, -10), :SNR=>60)
+spec_params = let D=Dict(:Znn=>(-90, -20), :SNR=>80)
     typeof(spec_var)<:Vector ? D : D[spec_var]
 end;
 
@@ -220,14 +220,17 @@ md"""
 """
 
 # ╔═╡ ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
-XdB = voodoo.adapt_RadarData(spec; var=spec_var); #cln_time = clnet[:time][clnet_it], Δs=1,
+XdB = voodoo.adapt_RadarData(spec; var=spec_var, AdjustDoppler=true); #cln_time = clnet[:time][clnet_it], Δs=1,
 
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
 begin 
     masked = XdB[:masked]
-    i_ts = XdB[:idx_ts] |> I->ifelse(typeof(I)<:Colon, 1:lenth(spec[:time]), I);
+    i_ts = XdB[:idx_ts] |> I->ifelse(typeof(I)<:Colon, 1:length(spec[:time]), I);
 	nrg, nts = size(masked);
 end;
+
+# ╔═╡ d82adda0-c465-40c5-8145-21190a0ae8ff
+nrg, length(spec[:height])
 
 # ╔═╡ d2a9e86f-0752-4026-a580-5479a39d0f16
 begin
@@ -237,7 +240,7 @@ end;
 
 # ╔═╡ a292de07-c1e6-455d-af7a-758a25e3586a
 md"""
-time index = $(I2d) _____ height index = $(H2d) ___ Show Altitude indicator: $(@bind Hx CheckBox(default=true))
+time index = $(I2d) _____ height index = $(H2d) ___ Show Altitude indicator: $(@bind Hx CheckBox(default=true)), Variable to Visualize $(@bind vooVar Select(spec_var))
 """
 
 # ╔═╡ e73901a0-e9d7-4076-bf40-02ade2a5e6ca
@@ -250,12 +253,12 @@ begin
 	# Height in km for concidered sub-range (default 250)
 	spec_Hkm = 1f-3spec[:height][1:nrg]
 	# Index for the first dimension of X_in (n_samples, 1, 6 , n_vel):
-	idx_pre = (att-1)nrg + ahh
+	idx_pre = spec[:spect_mask][ahh, att] + 1 # (att-1)nrg + ahh
 end;
 
 # ╔═╡ 4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 begin
-    X = voodoo.η₀₁(XdB[:features], ηlim = spec_params); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
+    X = Dict(:features=>voodoo.η₀₁(XdB[:features], ηlim = spec_params)); #η0=0, η1=50 )#η0=-100, η1=-40) #(XdB); # normalization [0,1] from η0 to η1
 end;
 
 # ╔═╡ 1eefd855-a523-439b-b734-5021e9039921
@@ -308,7 +311,8 @@ end;
 (prod∘size)(Ze) == sum(masked[:])
 
 # ╔═╡ 5962c23f-3828-4a98-bb42-373bee0c1331
-predict_var = voodoo.MakePrediction(X[:,:,:,1:2:end]; masked=masked); #, sizeout=size(masked)) let prevar = 
+# ╠═╡ show_logs = false
+predict_var = voodoo.MakePrediction(X; masked=masked); #, sizeout=size(masked)) let prevar = 
 #	aa = size(masked)
 #	index_mask = reshape(cumsum(masked[:]), aa)
 #	AA = fill(NaN32, (aa...,3))
@@ -323,6 +327,7 @@ predict_var = voodoo.MakePrediction(X[:,:,:,1:2:end]; masked=masked); #, sizeout
 
 # ╔═╡ 61abe2ac-4b88-4936-885f-6fd24fc7f756
 begin
+	# specific time and altitude spectrum:
 	s1 = plot(spec[:vel_nn],
 		try
 			[spec[:η_hh][:, aline] spec[:Znn][:, aline]]
@@ -331,23 +336,31 @@ begin
 		end		
 		, tick_dir=:out, ylim=spec_params[:Znn], xlim=extrema(spec[:vel_nn]), 
 		label=["Raw" "Proc"], ylabel="η(v) / dBm", legend=:outerright, left_margin=4Plots.mm,
-		title="Spectrum at $(Dates.format(clnet[:time][clnet_it][att], "HH:MM")) and $(round(1f-3spec[:height][ahh], digits=1)) km")
+		title="Spectrum at $(Dates.format(clnet[:time][idx_ts][att], "HH:MM")) and $(round(1f-3spec[:height][ahh], digits=1)) km")
 			
-	
-	Z2d, rng_lim = ARMtools.extract2DSpectrogram(spec, tline, var=spec_var);
+	# Doppler velocity versus height for spectra, either :Znn or :SNR;
+	Z2d, rng_lim = ARMtools.extract2DSpectrogram(spec, tline, var=vooVar);
 	s2 = heatmap(spec[:vel_nn], 1f-3spec[:height], Z2d,
-		c=:dense, ylim=1f-3rng_lim, xlim=extrema(spec[:vel_nn]), clim=spec_params[spec_var], tick_dir=:out,
+		c=:dense, ylim=1f-3rng_lim, xlim=extrema(spec[:vel_nn]),  tick_dir=:out, #clim=spec_params[vooVar],
 		ylabel="height / km", xlabel="Doppler v / m s⁻¹", colorbar=:bottom,
 		left_margin=3Plots.mm, bottom_margin=3Plots.mm);
 	
 	Hx && hline!([1f-3spec[:height][ahh]], c=:green, l=:dash, label=false)
-	s3 = plot(predict_var[:, att, 2], spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, label="$(Float16(predict_var[ahh, att,2]))",
-	xlabel="predictor @ LWP=$(round(clnet[:LWP][clnet_it][att], digits=1)) g m⁻²");
+
+	# Profile of predictions either :Znn, :SNR, or both:
+	s3 = plot([predict_var[:Znn][:, att, 2] predict_var[:SNR][:, att, 2]],
+		spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, link=:all,
+		label= ["Znn=$(Float16(predict_var[:Znn][ahh, att,2]))" "SNR=$(Float16(predict_var[:SNR][ahh, att,2]))"],
+		color=[:royalblue :green], legend=:topleft,
+		xlabel="predictor @ LWP=$(round(clnet[:LWP][idx_ts][att], digits=1)) g m⁻²");
+	# adding Lidar backscattering profile:
 	plot!(s3, log10.(β[:, tlidar]), 1f-3lidar[:height], inset=(1,bbox(0,0,1,1)), subplot=2, lc=:red,
 		ylim=1f-3rng_lim, xmirror=true, xlim=(-7,-3.5), background_color_subplot=:transparent, 
 		label="lidar β", legend=:bottomleft)
 	Hx && hline!([1f-3spec[:height][ahh]], c=:green, l=:dash, label=false)
-	s4 = heatmap(spec[:vel_nn][1:2:end], [1:6], X[idx_pre,1,:,1:2:end], colorbar=false, color=:dense, clim=(0,1));
+
+	# Spectogram with 6 spectra versus Doppler velocity:
+	s4 = idx_pre==0 ? plot() : heatmap(spec[:vel_nn][1:2:end], [1:6], X[:features][vooVar][idx_pre,1,:,:], colorbar=false, color=:dense, clim=(0,1));
 	# final layout plot
 	ll = @layout [a{0.2h} b{0.3w}; c d]
 	plot(s1, s4, s2, s3, layout=ll, size=(900, 500))
@@ -365,9 +378,9 @@ time index = $(I2d) _____ height index = $(H2d)
 
 # ╔═╡ 9f2ec824-7c28-409f-8fa1-18f4ed71be11
 begin
-    tm_tick = clnet[:time][1]:Minute(120):clnet[:time][end]
+    tm_tick = clnet[:time][clnet_it][1]:Minute(20):clnet[:time][clnet_it][end]
     str_tick = Dates.format.(tm_tick, "H:MM")
-	p0 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], clim=(-25, -5), title="$(PRODUCT) Z [dB]", color=:jet, xticks=(tm_tick, str_tick))
+	p0 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], ylim=(0, 6), clim=(-25, -5), title="$(PRODUCT) Z [dB]", color=:jet, xticks=(tm_tick, str_tick))
 		#heatmap(clnet[:time][clnet_it], 1f-3clnet[:height][1:nrg], clnet[:Ze][1:nrg, clnet_it], clim=(-25, 15), title="$(PRODUCT) Z [dB]", color=:jet)
 		
 	p1 = heatmap(lidar[:time][lidar_it], 1f-3lidar[:height], log10.(β[:, lidar_it]), clim=(-7, -4), title="HSRL β", ylim=(0, 8), color=:roma, xticks=(tm_tick, str_tick), xlabel="UTC from $(dd).$(mm).$(yy)" )
@@ -379,15 +392,18 @@ begin
 	
 	cs1 = palette(:viridis, 8)
 	cs1.colors.colors[1] = RGB{Float64}(.7, .7, .7)
-	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,2], clim=(.4, 1), color=cs1,
+	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[vooVar][:,:,2], ylim=(0, 6), clim=(.4, 1), color=cs1,
 		title="cloud-droplets detection", xticks=(tm_tick, str_tick));
-	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ylim=(0, 15), ymirror=true, ytickfontsize=8)
+	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xlim=extrema(tm_tick), xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true, ytickfontsize=8)
 
 	THx && vline!([spec[:time][tline]], c=:red1, l=:dash, label=false);
 	THx && hline!([1f-3spec[:height][ahh]], c=:red1, l=:dash, label=false);
 	#p4 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[:,:,3], clim=(.5, 1), color=cs1, title="non-cloud-droplets (ice/drizze/rain)")
 	plot(p0,p3,p2,p1, layout=(4,1), size=(800,999))
 end
+
+# ╔═╡ 252e3e3d-78fe-4a36-9bc6-3b2eb9b4c61b
+keys(predict_var)
 
 # ╔═╡ 203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 begin
@@ -448,9 +464,9 @@ version = "0.1.0"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
-git-tree-sha1 = "69f7020bd72f069c219b5e8c236c1fa90d2cb409"
+git-tree-sha1 = "16b6dbc4cf7caee4e1e75c49485ec67b667098a0"
 uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
-version = "1.2.1"
+version = "1.3.1"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -459,10 +475,10 @@ uuid = "6e696c72-6542-2067-7265-42206c756150"
 version = "1.1.4"
 
 [[deps.Adapt]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "0310e08cb19f5da31d08341c6120c047598f5b9c"
+deps = ["LinearAlgebra", "Requires"]
+git-tree-sha1 = "cc37d689f599e8df4f464b2fa3870ff7db7492ef"
 uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "3.5.0"
+version = "3.6.1"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -573,9 +589,9 @@ version = "0.12.10"
 
 [[deps.Compat]]
 deps = ["Dates", "LinearAlgebra", "UUIDs"]
-git-tree-sha1 = "61fdd77467a5c3ad071ef8277ac6bd6af7dd4c04"
+git-tree-sha1 = "7a60c856b9fa189eb34f5f8a6f6b5529b7942957"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
-version = "4.6.0"
+version = "4.6.1"
 
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -685,9 +701,9 @@ version = "0.3.2"
 
 [[deps.FFTW]]
 deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
-git-tree-sha1 = "90630efff0894f8142308e334473eba54c433549"
+git-tree-sha1 = "f9818144ce7c8c41edf5c4c179c684d92aa4d9fe"
 uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-version = "1.5.0"
+version = "1.6.0"
 
 [[deps.FFTW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -739,16 +755,16 @@ uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.3.8+0"
 
 [[deps.GR]]
-deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Preferences", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
-git-tree-sha1 = "00a9d4abadc05b9476e937a5557fcce476b9e547"
+deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Preferences", "Printf", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "UUIDs", "p7zip_jll"]
+git-tree-sha1 = "660b2ea2ec2b010bb02823c6d0ff6afd9bdc5c16"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.69.5"
+version = "0.71.7"
 
 [[deps.GR_jll]]
-deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Pkg", "Qt5Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "bc9f7725571ddb4ab2c4bc74fa397c1c5ad08943"
+deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt5Base_jll", "Zlib_jll", "libpng_jll"]
+git-tree-sha1 = "d5e1fd17ac7f3aa4c5287a61ee28d4f8b8e98873"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.69.1+0"
+version = "0.71.7+0"
 
 [[deps.Gettext_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "XML2_jll"]
@@ -1195,9 +1211,9 @@ version = "0.5.11"
 
 [[deps.Parsers]]
 deps = ["Dates", "SnoopPrecompile"]
-git-tree-sha1 = "6f4fbcd1ad45905a5dee3f4256fabb49aa2110c6"
+git-tree-sha1 = "478ac6c952fddd4399e71d4779797c538d0ff2bf"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
-version = "2.5.7"
+version = "2.5.8"
 
 [[deps.Pipe]]
 git-tree-sha1 = "6842804e7867b115ca9de748a0cf6b364523c16d"
@@ -1228,10 +1244,12 @@ uuid = "995b91a9-d308-5afd-9ec6-746e21dbc043"
 version = "1.3.4"
 
 [[deps.Plots]]
-deps = ["Base64", "Contour", "Dates", "Downloads", "FFMPEG", "FixedPointNumbers", "GR", "JLFzf", "JSON", "LaTeXStrings", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "Pkg", "PlotThemes", "PlotUtils", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "RelocatableFolders", "Requires", "Scratch", "Showoff", "SnoopPrecompile", "SparseArrays", "Statistics", "StatsBase", "UUIDs", "UnicodeFun", "Unzip"]
-git-tree-sha1 = "f60a3090028cdf16b33a62f97eaedf67a6509824"
+deps = ["Base64", "Contour", "Dates", "Downloads", "FFMPEG", "FixedPointNumbers", "GR", "JLFzf", "JSON", "LaTeXStrings", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "Pkg", "PlotThemes", "PlotUtils", "Preferences", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "RelocatableFolders", "Requires", "Scratch", "Showoff", "SnoopPrecompile", "SparseArrays", "Statistics", "StatsBase", "UUIDs", "UnicodeFun", "Unzip"]
+git-tree-sha1 = "6a6b86229e3898bc6f1f0b3e85ad67d14cf36395"
+repo-rev = "master"
+repo-url = "git@github.com:pablosaa/Plots.jl.git"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-version = "1.35.0"
+version = "1.38.5-dev"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
@@ -1328,9 +1346,9 @@ version = "0.7.0"
 
 [[deps.Scratch]]
 deps = ["Dates"]
-git-tree-sha1 = "f94f779c94e58bf9ea243e77a37e16d9de9126bd"
+git-tree-sha1 = "30449ee12237627992a99d5e30ae63e4d78cd24a"
 uuid = "6c6a2e73-6563-6170-7368-637461726353"
-version = "1.1.1"
+version = "1.2.0"
 
 [[deps.SentinelArrays]]
 deps = ["Dates", "Random"]
@@ -1777,12 +1795,13 @@ version = "1.4.1+0"
 # ╠═387496f2-b895-4cea-9608-8ded2a95b1a0
 # ╠═be7b6cc2-3099-4836-b53d-2e94f098810e
 # ╠═b759e73a-e050-4d66-b65a-9292ebf4d10e
-# ╟─897e85a6-1abf-4a43-b8c7-d7538f64ad5e
+# ╠═897e85a6-1abf-4a43-b8c7-d7538f64ad5e
 # ╠═ea93b55b-4081-4215-abd2-c1b1dde7fd84
 # ╟─6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 # ╠═ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
-# ╟─d2a9e86f-0752-4026-a580-5479a39d0f16
+# ╠═d82adda0-c465-40c5-8145-21190a0ae8ff
+# ╠═d2a9e86f-0752-4026-a580-5479a39d0f16
 # ╟─a292de07-c1e6-455d-af7a-758a25e3586a
 # ╟─e73901a0-e9d7-4076-bf40-02ade2a5e6ca
 # ╠═61abe2ac-4b88-4936-885f-6fd24fc7f756
@@ -1797,6 +1816,7 @@ version = "1.4.1+0"
 # ╟─0824c6dd-6c0a-44fc-9468-e97a851f1374
 # ╟─537c4737-9db9-4275-ae88-3ee34ce3d1c7
 # ╠═9f2ec824-7c28-409f-8fa1-18f4ed71be11
+# ╠═252e3e3d-78fe-4a36-9bc6-3b2eb9b4c61b
 # ╠═203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 # ╠═e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
 # ╟─f07042d7-8c53-41d7-8468-ae1d05143626

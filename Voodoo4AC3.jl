@@ -163,7 +163,9 @@ function adapt_RadarData(spec::Dict;
     
     ## 0) +++
     # Checking initialized variables:
-    var = if typeof(var)<:Symbol || typeof(var)<:Vector{Symbol}
+    var = if typeof(var)<:Symbol && haskey(spec, var)
+        [var]
+    elseif typeof(var)<:Vector{Symbol}
         [v for v in var if haskey(spec,v)]
     else
         @warn "Optional variable var needs to be Symbol or Vector{Symbol}"
@@ -422,5 +424,21 @@ end
 # ----/
 
 end  # end of module
+
+module voodoo2cloudnet
+using NCDatasets
+using CloudnetTools
+
+function voodoo2categorize(Xpre::Matrix, cate_file::String; modelname="mykakes")
+        NCDataset(cate_file, "a") do nc
+	cate=nc[:category_bits];
+        foreach(eachindex(Xpre)) do idx
+            Xpre[idx]>0 && (cate[idx] |= eltype(cate)(1) )
+	end
+        nc.attrib["postprocessor"] = "Voodoo_v2.0, Modelname: $(modelname)"
+        end
+end
+
+end  # end of module voodoo2cloudnet
 # ----!
 # end of script
