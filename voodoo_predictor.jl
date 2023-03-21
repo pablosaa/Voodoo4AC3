@@ -39,6 +39,12 @@ begin
 	using TOML
 end
 
+# ╔═╡ bcb38ebc-9c1d-4585-b06e-546b8a766de5
+using NCDatasets
+
+# ╔═╡ e5cfea2d-f548-416c-a9c7-92dfc92b4de6
+using Printf
+
 # ╔═╡ d19215a4-20d0-40ad-a03a-c77ed3f91da9
 include("Voodoo4AC3.jl");
 
@@ -114,7 +120,7 @@ PlutoUI.combine() do Child
 	md"""
 	Introduce Date = $(Child(DateField(default=Date(2019,11,18))))
 	 and Hour = $(Child(TimeField(default=now())))
-	, Use file for specific hour? $(Child(CheckBox(true)))
+	, Use file for specific hour? $(Child(CheckBox(false)))
 	"""
 end
 )
@@ -222,6 +228,9 @@ md"""
 # ╔═╡ ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
 XdB = voodoo.adapt_RadarData(spec; var=spec_var, AdjustDoppler=true); #cln_time = clnet[:time][clnet_it], Δs=1,
 
+# ╔═╡ 572828d4-c67f-4fbf-81ba-a72fd7a64ee1
+keys(XdB[:features]), spec_var
+
 # ╔═╡ 48195c22-6cf5-4e14-9270-6b361312353d
 begin 
     masked = XdB[:masked]
@@ -307,9 +316,6 @@ end;
 	AA
 end;
 
-# ╔═╡ 18afaa13-4245-4c58-8e51-836db7043b1a
-(prod∘size)(Ze) == sum(masked[:])
-
 # ╔═╡ 5962c23f-3828-4a98-bb42-373bee0c1331
 # ╠═╡ show_logs = false
 predict_var = voodoo.MakePrediction(X; masked=masked); #, sizeout=size(masked)) let prevar = 
@@ -348,9 +354,10 @@ begin
 	Hx && hline!([1f-3spec[:height][ahh]], c=:green, l=:dash, label=false)
 
 	# Profile of predictions either :Znn, :SNR, or both:
-	s3 = plot([predict_var[:Znn][:, att, 2] predict_var[:SNR][:, att, 2]],
-		spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim, link=:all,
-		label= ["Znn=$(Float16(predict_var[:Znn][ahh, att,2]))" "SNR=$(Float16(predict_var[:SNR][ahh, att,2]))"],
+	s3 = plot([V[:, att, 2] for (k,V) in predict_var], #, #[:Znn][:, att, 2] predict_var[:SNR][:, att, 2]],
+		spec_Hkm, xlim=(0, 1), ylim=1f-3rng_lim,
+		label= ["$(k)=$(Float16(V[ahh, att, 2]))" for (k,V) in predict_var] |> permutedims,
+			#"Znn=$(Float16(predict_var[:Znn][ahh, att,2]))" "SNR=$(Float16(predict_var[:SNR][ahh, att,2]))"],
 		color=[:royalblue :green], legend=:topleft,
 		xlabel="predictor @ LWP=$(round(clnet[:LWP][idx_ts][att], digits=1)) g m⁻²");
 	# adding Lidar backscattering profile:
@@ -366,6 +373,12 @@ begin
 	plot(s1, s4, s2, s3, layout=ll, size=(900, 500))
 end
 
+# ╔═╡ 1ca26f56-c55b-4c69-b53c-473ee1597274
+[V[ahh, att, 2] for (k,V) in predict_var] |> prod
+
+# ╔═╡ b0fbd838-1ca1-4c47-be87-aae0bab1041b
+size(X[:features][:SNR])
+
 # ╔═╡ 0824c6dd-6c0a-44fc-9468-e97a851f1374
 md"""
 Show time, height indicators: $(@bind THx CheckBox(default=true))
@@ -378,7 +391,12 @@ time index = $(I2d) _____ height index = $(H2d)
 
 # ╔═╡ 9f2ec824-7c28-409f-8fa1-18f4ed71be11
 begin
-    tm_tick = clnet[:time][clnet_it][1]:Minute(20):clnet[:time][clnet_it][end]
+    tm_tick = let t = clnet[:time][idx_ts]
+		idxt = range(1, stop=length(t), length=12) |> collect |> x->floor.(Int, x) |> unique
+		t[idxt]
+	end
+		
+		#clnet[:time][clnet_it][1]:Minute(20):clnet[:time][clnet_it][end]
     str_tick = Dates.format.(tm_tick, "H:MM")
 	p0 = heatmap(radar[:time][radar_it], 1f-3radar[:height][1:nrg], radar[:Ze][1:nrg, radar_it], ylim=(0, 6), clim=(-25, -5), title="$(PRODUCT) Z [dB]", color=:jet, xticks=(tm_tick, str_tick))
 		#heatmap(clnet[:time][clnet_it], 1f-3clnet[:height][1:nrg], clnet[:Ze][1:nrg, clnet_it], clim=(-25, 15), title="$(PRODUCT) Z [dB]", color=:jet)
@@ -392,7 +410,8 @@ begin
 	
 	cs1 = palette(:viridis, 8)
 	cs1.colors.colors[1] = RGB{Float64}(.7, .7, .7)
-	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[vooVar][:,:,2], ylim=(0, 6), clim=(.4, 1), color=cs1,
+	p3 =heatmap(spec[:time][i_ts], 1f-3spec[:height][1:nrg], predict_var[vooVar][:,:,2],
+		ylim=(0, 6), clim=(.4, 1), color=cs1,
 		title="cloud-droplets detection", xticks=(tm_tick, str_tick));
 	plot!(clnet[:time][clnet_it], clnet[:LWP][clnet_it], c=:black, xlim=extrema(tm_tick), xticks=false, label="LWP", inset=(1, bbox(0,0,0.87,1)), subplot=2, background_color_subplot=:transparent, ymirror=true, ytickfontsize=8)
 
@@ -402,8 +421,8 @@ begin
 	plot(p0,p3,p2,p1, layout=(4,1), size=(800,999))
 end
 
-# ╔═╡ 252e3e3d-78fe-4a36-9bc6-3b2eb9b4c61b
-keys(predict_var)
+# ╔═╡ 5b7fb11c-4f95-443c-a0df-fe4a67c094ca
+tm_tick |> size
 
 # ╔═╡ 203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 begin
@@ -436,14 +455,21 @@ ARMtools = "04fa4220-f7a9-42e2-a909-1083f698c312"
 CloudnetTools = "c185f6a1-06dd-4ea4-b2f4-959e91ffad06"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
+NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
+ARMtools = "~0.1.0"
+CloudnetTools = "~0.1.0"
 ImageFiltering = "~0.7.2"
+NCDatasets = "~0.12.13"
+Plots = "~1.38.5"
 PlutoUI = "~0.7.43"
+PyCall = "~1.95.1"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -452,7 +478,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.0"
 manifest_format = "2.0"
-project_hash = "4fb4283140be24a8eb1630f308d63d19beb22604"
+project_hash = "56a751dbb809362c187a822b7b123fa877236ca3"
 
 [[deps.ARMtools]]
 deps = ["Dates", "ImageFiltering", "Interpolations", "NCDatasets", "Printf", "Statistics", "Test", "Wavelets"]
@@ -756,15 +782,15 @@ version = "3.3.8+0"
 
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Preferences", "Printf", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "UUIDs", "p7zip_jll"]
-git-tree-sha1 = "660b2ea2ec2b010bb02823c6d0ff6afd9bdc5c16"
+git-tree-sha1 = "4423d87dc2d3201f3f1768a29e807ddc8cc867ef"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.71.7"
+version = "0.71.8"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt5Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "d5e1fd17ac7f3aa4c5287a61ee28d4f8b8e98873"
+git-tree-sha1 = "3657eb348d44575cc5560c80d7e55b812ff6ffe1"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.71.7+0"
+version = "0.71.8+0"
 
 [[deps.Gettext_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "XML2_jll"]
@@ -888,9 +914,9 @@ uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
 version = "0.1.8"
 
 [[deps.InvertedIndices]]
-git-tree-sha1 = "82aec7a3dd64f4d9584659dc0b62ef7db2ef3e19"
+git-tree-sha1 = "0dc7b50b8d436461be01300fd8cd45aa0274b038"
 uuid = "41ab1584-1d38-5bbf-9106-f11c6c58b48f"
-version = "1.2.0"
+version = "1.3.0"
 
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "630b497eafcc20001bba38a4651b327dcfc491d2"
@@ -1072,9 +1098,9 @@ version = "0.5.10"
 
 [[deps.MakieCore]]
 deps = ["Observables"]
-git-tree-sha1 = "2c3fc86d52dfbada1a2e5e150e50f06c30ef149c"
+git-tree-sha1 = "9926529455a331ed73c19ff06d16906737a876ed"
 uuid = "20f20a25-4f0e-4fdf-b5d1-57303727442b"
-version = "0.6.2"
+version = "0.6.3"
 
 [[deps.MappedArrays]]
 git-tree-sha1 = "e8b359ef06ec72e8c030463fe02efe5527ee5142"
@@ -1258,10 +1284,10 @@ uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 version = "0.7.50"
 
 [[deps.Polynomials]]
-deps = ["LinearAlgebra", "MakieCore", "RecipesBase"]
-git-tree-sha1 = "a10bf14e9dc2d0897da7ba8119acc7efdb91ca80"
+deps = ["ChainRulesCore", "LinearAlgebra", "MakieCore", "RecipesBase"]
+git-tree-sha1 = "86efc6f761df655f8782f50628e45e01a457d5a2"
 uuid = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
-version = "3.2.5"
+version = "3.2.8"
 
 [[deps.PooledArrays]]
 deps = ["DataAPI", "Future"]
@@ -1277,9 +1303,9 @@ version = "1.3.0"
 
 [[deps.PrettyTables]]
 deps = ["Crayons", "Formatting", "LaTeXStrings", "Markdown", "Reexport", "StringManipulation", "Tables"]
-git-tree-sha1 = "96f6db03ab535bdb901300f88335257b0018689d"
+git-tree-sha1 = "548793c7859e28ef026dba514752275ee871169f"
 uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
-version = "2.2.2"
+version = "2.2.3"
 
 [[deps.Printf]]
 deps = ["Unicode"]
@@ -1407,15 +1433,15 @@ version = "0.1.1"
 
 [[deps.Static]]
 deps = ["IfElse"]
-git-tree-sha1 = "d0435ba43ab5ad1cbb5f0d286ca4ba67029ed3ee"
+git-tree-sha1 = "08be5ee09a7632c32695d954a602df96a877bf0d"
 uuid = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
-version = "0.8.4"
+version = "0.8.6"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
-git-tree-sha1 = "2d7d9e1ddadc8407ffd460e24218e37ef52dd9a3"
+git-tree-sha1 = "6aa098ef1012364f2ede6b17bf358c7f1fbe90d4"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.5.16"
+version = "1.5.17"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "6b7ba252635a5eff6a0b0664a41ee140a1c9e72a"
@@ -1460,9 +1486,9 @@ version = "1.0.1"
 
 [[deps.Tables]]
 deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "LinearAlgebra", "OrderedCollections", "TableTraits", "Test"]
-git-tree-sha1 = "c79322d36826aa2f4fd8ecfa96ddb47b174ac78d"
+git-tree-sha1 = "1544b926975372da01227b382066ab70e574a3ec"
 uuid = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
-version = "1.10.0"
+version = "1.10.1"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
@@ -1773,6 +1799,8 @@ version = "1.4.1+0"
 # ╠═99feaf54-05ed-11ec-0472-618993c00b94
 # ╠═40bc4a4e-a4d3-4226-a672-ed36cddbb7cf
 # ╠═083acdfd-3b3d-4586-952a-8a87aa3d1d3e
+# ╠═bcb38ebc-9c1d-4585-b06e-546b8a766de5
+# ╠═e5cfea2d-f548-416c-a9c7-92dfc92b4de6
 # ╠═d19215a4-20d0-40ad-a03a-c77ed3f91da9
 # ╟─ba096470-3f16-4085-a073-3c632d534623
 # ╟─82e5b299-86bb-4493-b71e-5f15ac8fa2b4
@@ -1799,24 +1827,26 @@ version = "1.4.1+0"
 # ╠═ea93b55b-4081-4215-abd2-c1b1dde7fd84
 # ╟─6cf59a76-fa76-4a42-bcf9-778cee6cd05f
 # ╠═ccc79ef8-efa8-4786-b30e-6c1c3bf90e2c
+# ╠═572828d4-c67f-4fbf-81ba-a72fd7a64ee1
 # ╠═48195c22-6cf5-4e14-9270-6b361312353d
 # ╠═d82adda0-c465-40c5-8145-21190a0ae8ff
 # ╠═d2a9e86f-0752-4026-a580-5479a39d0f16
 # ╟─a292de07-c1e6-455d-af7a-758a25e3586a
 # ╟─e73901a0-e9d7-4076-bf40-02ade2a5e6ca
 # ╠═61abe2ac-4b88-4936-885f-6fd24fc7f756
+# ╠═1ca26f56-c55b-4c69-b53c-473ee1597274
 # ╠═4f2ab6d4-6192-48a1-8eb6-018ac6dc7f4f
 # ╠═1eefd855-a523-439b-b734-5021e9039921
 # ╠═1648c2d9-2ea2-4903-b480-07011fb5d5d3
 # ╠═9005a3da-36d5-4b41-8030-f8f843010638
 # ╠═97cfd917-d12f-415f-adbe-abf5af8e9267
 # ╠═6be32636-4985-457b-b91c-cf0662db8699
-# ╠═18afaa13-4245-4c58-8e51-836db7043b1a
 # ╠═5962c23f-3828-4a98-bb42-373bee0c1331
+# ╠═b0fbd838-1ca1-4c47-be87-aae0bab1041b
 # ╟─0824c6dd-6c0a-44fc-9468-e97a851f1374
 # ╟─537c4737-9db9-4275-ae88-3ee34ce3d1c7
 # ╠═9f2ec824-7c28-409f-8fa1-18f4ed71be11
-# ╠═252e3e3d-78fe-4a36-9bc6-3b2eb9b4c61b
+# ╠═5b7fb11c-4f95-443c-a0df-fe4a67c094ca
 # ╠═203d1249-06ac-4fcf-abd0-2fbf2b6fa71c
 # ╠═e87b0e05-a2c9-40ca-b23e-c589e6f9f9a3
 # ╟─f07042d7-8c53-41d7-8468-ae1d05143626
