@@ -162,16 +162,19 @@ function adapt_RadarData(spec::Dict;
                          
     
     ## 0) +++
+    default_var = [:Znn, :SNR]
     # Checking initialized variables:
-    var = if typeof(var)<:Symbol && haskey(spec, var)
+    var = if typeof(var)<:Symbol && (var ∈ default_var)
         [var]
     elseif typeof(var)<:Vector{Symbol}
-        [v for v in var if haskey(spec,v)]
+        let tmp = [v for v in var if (v ∈ default_var)]
+            isempty(tmp) && @error "Variables $(var) not supported!"
+            tmp
+        end
     else
-        @warn "Optional variable var needs to be Symbol or Vector{Symbol}"
-        [:Znn]
+        @error "Optional variable var needs to be Symbol or Vector{Symbol} ∈ (:Znn, :SNR) "
     end
-
+       
     #if ~(!isempty(var[:Znn]) && (typeof(var[:Znn]) <: Tuple{Real, Real} ))
     #    @warn "input variable var[:Znn] needs to be type Tuple(Real, Real). Ignored!"
     #    var[:Znn] =()
@@ -280,7 +283,7 @@ function adapt_RadarData(spec::Dict;
                 :clnet_it => clnet_it)
     
     # 5.1) Checking if optional adjustment of Doppler spectrum is performed:
-    AdjustDoppler && merge(Xout, Dict(:νₙ => Vn_voo))
+    AdjustDoppler && merge!(Xout, Dict(:νₙ => Vn_voo))
     
     return Xout
     
