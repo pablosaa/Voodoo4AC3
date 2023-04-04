@@ -230,42 +230,38 @@ function adapt_RadarData(spec::Dict;
     # Creating the features output array:
     # according to voodoo predictor, should be (n_samples, n_ch=1, n_ts=6, n_vel)
     features = Dict(x=>fill(NaN32, (n_samples, 1, 6, n_vel)) for x in var )
-
-    # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
-    fuzzydat = Dict(k=>PermutedDimsArray(features[k], (4, 1, 2, 3)) for k in var)
-    
+        
     ## 3.2) ++++
-    ## 3.2.1) ++++
     idx_rad, idx_voo, Vn_voo = index4DopplerDims(spec[:vel_nn],
                                                  adjust = AdjustDoppler)
 
-    ## 3.2.2) ++++
+    ## 3.3) ++++
     # Filling feature array with 6 consecutive spectra centered at cln_time:
+    NN = lastindex(spec[:time])
 
-    let i0 = 1
-        NN = lastindex(spec[:time])
-        time_iter = ifelse(typeof(idx_ts) <: Colon, 1:n_ts , idx_ts)
-        foreach(time_iter) do k
-            len_in = findall(≥(0), spec[:spect_mask][idxrng, k])
-    
-            iall = range(i0, length=length(len_in) )
-        
-            δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(NN, max.(1, x))
+    foreach(var) do kk
+        # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
+        fuzzydat = PermutedDimsArray(features[kk], (4, 1, 2, 3)) 
 
-            foreach(enumerate(δts)) do (j, its)
-                dat_in = spec[:spect_mask][idxrng, its][len_in] .+ 1
+        let i0 = 1
+            time_iter = ifelse(typeof(idx_ts) <: Colon, 1:n_ts , idx_ts)
+            foreach(time_iter) do k
+                len_in = findall(≥(0), spec[:spect_mask][idxrng, k])
+                iall = range(i0, length=length(len_in) )
                 
-                for (i, x) ∈ zip(iall, dat_in)
-                    x<1 && continue
-                    foreach(var) do kk
-                        fuzzydat[kk][idx_voo, i, 1, j] = spec[kk][idx_rad, x]
+                δts = k .+ range(-2Δs, step=Δs, length=6) |> x-> min.(NN, max.(1, x))
+                foreach(enumerate(δts)) do (j, its)
+                    dat_in = spec[:spect_mask][idxrng, its][len_in] .+ 1
+                    for (i, x) ∈ zip(iall, dat_in)
+                        x<1 && continue
+                        fuzzydat[idx_voo, i, 1, j] = spec[kk][idx_rad, x]
                     end
                 end
-            end
-            i0 += length(len_in) 
+                i0 += length(len_in) 
+           end
         end
     end
-    
+
     # 3.3) ++++ creating output variables:
     # defining output array: masked
     masked = @. ifelse(spec[:spect_mask][idxrng, idx_ts] ≥ 0, true, false)
