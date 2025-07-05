@@ -2,9 +2,9 @@
 ### Implementation of Voodoo for ARM radars
 B07 project within (AC)3
 
-#### Gemerating Zarr files from ARM radar data:
+#### Generating Zarr files from ARM radar data:
 A script to run a Zarr file generator for multiple days is ```create_radar_features2zarr.jl```.
-For example to generate for the 26 and 27th of October 2019, run from CLI as follow:
+For example to use the generator for the 26th and 27th of October 2019, run the script from CLI as follow:
 ```
 # to run the days indicated in the script:
 > ./create_radar_features2zarr.jl
@@ -45,13 +45,18 @@ spec_var = :Znn  # or optional :SNR for signal-to-noise-ratio
 # reading Cloudnet categorize file:
 > clnet = CloudnetTools.readCLNFile("cloudnet_data/20200415_moasic_categorize.nc");
 
+# reading ARM's KAZR spectrum for 2020-04-15 at 06UTC:
 > spec = spec = ARMtools.readSPECCOPOL("moskazrcfrspcgecopolM1.a1.20200415.060005.nc");
+
+# Adapting the KAZR spectrum to Voodoo normalized tensor format:
 > XdB = voodoo.adapt_RadarData(spec,
                                 cln_time=clnet[:time],
                                 var=spec_var,
                                 LimHm=(10 ,10f3),
                                 Δs=3,
                                 Normalize=spec_params);
+
+# Storing the result as ZARR file to be used by Voodoo:
 > voodoo.to_zarr(XdB, clnet, "input_zarr/moskazrcfrspcgecopol.voodoo_Znn.20200415.060005.zarr"; var=spec_var)
 ```
 
