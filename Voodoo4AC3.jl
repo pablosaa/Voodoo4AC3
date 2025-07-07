@@ -14,22 +14,42 @@ function MakePrediction(X_in::Dict; masked = [])
 
     return predict_var
 end
-function MakePrediction(X_in::Array{<:AbstractFloat, 4};
-        masked = [])
+function MakePrediction(X_in::Array{<:AbstractFloat}; masked = [])
     
+    # Defining which version to use:
+    VERSION = let ND=ndims(X_in)
+        if ND==4
+            1
+        elseif ND==3
+            1 #2
+        else
+            @error "Input Array has to have 4 dims (general version) or 3 dims (ARM version)"
+        end
+    end
+
     # loading python torch package:
     torch = pyimport("torch");
 
+    # Defining which version to use:
+    PATH_VER = VERSION==1 ? "" : "Vnet2_0-dy0-00"
+     
     # including path of Voodoo's Library into python path:
-    pushfirst!(PyVector(pyimport("sys")."path"), joinpath(@__DIR__, "Voodoo") );
+    pushfirst!(PyVector(pyimport("sys")."path"), joinpath(@__DIR__, "Voodoo", PATH_VER) );
 
     # Loading Voodoo Library Torch model:
     TM = pyimport("libVoodoo.TorchModel");
 
     # ---
     # Defining Voodoo model input parameters:
-    model_setup_file = "Voodoo/VnetSettings-1.toml"
-    trained_model = "Voodoo/Vnet0x60de1687-fnX-gpu0-VN.pt"
+    model_setup_file = joinpath("Voodoo", PATH_VER, "VnetSettings-1.toml") #"Voodoo/VnetSettings-1.toml"
+    trained_model = if VERSION==1
+        joinpath("Voodoo", PATH_VER, "Vnet0x60de1687-fnX-gpu0-VN.pt")
+    elseif VERSION==2
+        joinpath("Voodoo", PATH_VER, "Vnet2_0-dy0-00-fn1-NSA-cuda1.pt")
+    else
+        @error "VERSION muss be either 1 or 2."
+    end
+
     NCLASSES = 3
     USEDEVICE = "cpu"
 
@@ -94,7 +114,7 @@ function η₀₁(η::Dict; ηlim=Dict())
     H_out = Dict(k=>η₀₁(v; ηlim=thelims[k]) for (k,v) ∈ η)
     return H_out
 end
-function η₀₁(η::Array{<:AbstractFloat, 4}; ηlim=())
+function η₀₁(η::Array{<:AbstractFloat}; ηlim=())
     (η0, η1) = if typeof(ηlim) <: NTuple{2, Real}
         sort([ηlim...])
     elseif typeof(ηlim) <: Real
@@ -158,7 +178,9 @@ function adapt_RadarData(spec::Dict;
                          Δs::Int = 5,
                          LimHm::Tuple{Real, Real} = (NaN32, NaN32),
                          AdjustDoppler = false,
-                         Normalize::Dict=Dict())
+                         Normalize::Dict=Dict(),
+                         ARM::Bool=true,
+    )
                          
     
     ## 0) +++
@@ -244,7 +266,7 @@ function adapt_RadarData(spec::Dict;
 
     foreach(var) do kk
         # helper variable to fill data into features: (n_vel, n_samples, n_ch, n_ts)
-        fuzzydat = PermutedDimsArray(features[kk], (4, 1, 2, 3)) 
+        fuzzydat = PermutedDimsArray(features[kk], (4, 1, 2, 3))
 
         let i0 = 1
             time_iter = ifelse(typeof(idx_ts) <: Colon, 1:n_ts , idx_ts)
@@ -269,20 +291,23 @@ function adapt_RadarData(spec::Dict;
     # defining output array: masked
     masked = @. ifelse(spec[:spect_mask][idxrng, idx_ts] ≥ 0, true, false)
 
-    # 4) ++++ Optional Normalization:
+    # 4) ++++ If ARM KAZR torch model will be used, then drop second dimension:
+    ARM && (features = Dict(k=>dropdims(features[k], dims=2) for k ∈ var) )
+
+    # 5) ++++ Optional Normalization:
     # converting features array into normalized array [0, 1]
     !isempty(Normalize) && foreach(pairs(Normalize)) do (k,v)
         haskey(features, k) && (features[k] = voodoo.η₀₁(features[k], ηlim = v))
     end
-    
-    # 5) ++++ Creating output Dictionary:
+
+    # 6) ++++ Creating output Dictionary:
     Xout = Dict(:features =>features,
                 :masked => masked,
                 :idx_ts => idx_ts,
                 :limrng => LimHm,
                 :clnet_it => clnet_it)
     
-    # 5.1) Checking if optional adjustment of Doppler spectrum is performed:
+    # 6.1) Checking if optional adjustment of Doppler spectrum is performed:
     AdjustDoppler && merge!(Xout, Dict(:νₙ => Vn_voo))
     
     return Xout
@@ -334,15 +359,12 @@ end
 Function to store the features Array as Zarr file for VOODOO
 training and predictions.
 """
-function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
+function to_zarr(Xin::Dict, clnet::Dict, zfilen::String; var=:Znn)
 
     # Loading necessary packages:
     xr = pyimport("xarray")
     da = pyimport("dask.array")
 
-    # Defining size for Zarr file dimentions:
-    sizedims = size(Xin[:features])
-    n_samples, _, n_spec, n_velocity = sizedims;
     n_rg, n_ts = size(Xin[:masked])
 
     # Vector{Bool} with indexes of considered spectrum time in cloudnet:
@@ -357,7 +379,15 @@ function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
     
     ## Converting Julia variables to dask:
     ## ***** For N-D variales ***********
-    FeaturesArray = let tmp = dropdims(Xin[:features]; dims=2)
+     # Defining size for Zarr file dimentions:
+     n_samples, n_spec, n_velocity, i₁ = let sizedims = size(Xin[:features][var])
+        iₐ = sizedims .== 1
+        sizedims[findall(.!iₐ)]..., findfirst(iₐ)
+    end
+
+    FeaturesArray = let 
+        tmp = isnothing(i₁) ? Xin[:features][var] : dropdims(Xin[:features][var]; dims=i₁)
+       
         features = PermutedDimsArray(tmp, (1,3,2))
         da.from_array(features, chunks = (floor(n_samples/4), floor(n_velocity/4), 2));
     end
@@ -415,8 +445,9 @@ function to_zarr(Xin::Dict, clnet::Dict, zfilen::String)
     try
         ND_dataset.to_zarr(store = zfilen, mode="w")
         return true
-    catch
+    catch e
         @warn "Cannot create Zarr $zfilen"
+        println(e)
         return false
     end
 end
@@ -427,15 +458,34 @@ end  # end of module
 module voodoo2cloudnet
 using NCDatasets
 using CloudnetTools
+using DataStructures
 
-function voodoo2categorize(Xpre::Matrix, cate_file::String; modelname="mykakes")
-        NCDataset(cate_file, "a") do nc
-	cate=nc[:category_bits];
-        foreach(eachindex(Xpre)) do idx
-            Xpre[idx]>0 && (cate[idx] |= eltype(cate)(1) )
-	end
-        nc.attrib["postprocessor"] = "Voodoo_v2.0, Modelname: $(modelname)"
+function voodoo2categorize(Xpre::Matrix, cate_file::String; pₜ=0.5, modelname="mykakes")
+    # checking if categorize file does exist:
+    !isfile(cate_file) && @error "$(cate_file) cannot be found!"
+
+    NCDataset(cate_file, "a") do nc
+        cate=nc[:category_bits];
+        @assert size(Xpre) == size(cate)
+        index_pₜ = findall(≥(pₜ), Xpre)
+        foreach(index_pₜ) do idx
+            cate[idx] |= eltype(cate)(1)
         end
+        nc.attrib["postprocessor"] = "Voodoo_v2.0, Modelname: $(modelname)"
+    end
+
+    # re-computing Cloudnet retrievals for the new categorization file:
+    BASE_PATH = dirname(cate_file)
+    base_name = basename(cate_file)
+    output_prods = (:classification, :lwc, :iwc, :drizzle, :der, :ier)
+
+    CLNTprod = OrderedDict(k => joinpath(BASE_PATH, replace(base_name, "categorize"=>k))
+                           for k ∈ output_prods)
+
+    # starting computation:
+    foreach(CLNTprod) do (k, V)
+        CloudnetTools.ACTRIS.generate_products(k, cate_file, V)
+    end
 end
 
 end  # end of module voodoo2cloudnet

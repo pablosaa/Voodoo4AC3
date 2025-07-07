@@ -10,9 +10,9 @@ using CloudnetTools: readCLNFile
 include("Voodoo4AC3.jl")
 
 # defining date and time to analyze:
-years = (2020) #2019
-months = (2,3,4,11,12) #01
-days = (1:31) #01
+years = (2019) #2019
+months = (1) #01
+days = (26) #01
 hours = ()
 
 !isempty(ARGS) && foreach(ARGS) do in
@@ -35,11 +35,11 @@ const CLNET_PATH = joinpath(B07_PATH, "output") #joinpath(homedir(), "LIM/data/C
 # NOTE: data type for spectra files:
 # * before ~june 2019 (a0 product) is fileext=".cdf"
 # * after ~june 2019 (a1 product) is fileext=".nc"
-const fnspecext = ".nc"  # ".cdf"
+const fnspecext = ".cdf"  # ".nc"  # 
 
 # Limits for normalization based on variable:
-spec_params = Dict(:Znn=>(-100, -10), :SNR=>(0, 70));
-spec_var = :Znn
+spec_params = Dict(:Znn=>(-105, -10), :SNR=>(0, 80));
+spec_var = :SNR #:Znn
 
 println(now())
 
@@ -53,15 +53,19 @@ for yy ∈ years
             end
             
             # DATE dependent parameters:
-            local OUTDAT_PATH = joinpath(B07_PATH, "voodoo", @sprintf("%02d/%02d/%02d", yy, mm, dd))
-
-            # Reading CloudNet data input:
+            #local OUTDAT_PATH = joinpath(B07_PATH, "voodoo_100-0", @sprintf("%02d/%02d/%02d", yy, mm, dd))
+            local OUTDAT_PATH = "/tmp"    
+            # Looking for CloudNet data input:
             local clnet_file = ARMtools.getFilePattern(CLNET_PATH, "CEIL10m", yy, mm, dd, fileext="categorize.nc");
             isnothing(clnet_file) && continue
 
+            # Loading Cloudnet data:
             clnet = readCLNFile(clnet_file);
 
-            # Reading all available files for the day:
+            # =
+            # ARM radar spectrum comes in hourly data files.
+            # Reading all available files for the day (if variable hours is empty):
+            # Optionally, read only the files specified by the variable hours=
             files_of_day = let fn_tmp=String[]
                 if !isempty(hours)
                     foreach(hours) do hr
@@ -82,24 +86,29 @@ for yy ∈ years
 
             # running over hours:
             for spec_file ∈ files_of_day 
-            #let spec_file=files_of_day
-            #for hr ∈ hours
-                #spec_file = ARMtools.getFilePattern(PATH_DATA, PROD_TYPE , yy, mm, dd; hh=hr, fileext=fnspecext)
+                
                 !isfile(spec_file) && (@warn "spectrum data does not exist! $(spec_file)"; continue)
-                 
+                
+                # Reading radar spectrum data files:
                 spec = ARMtools.readSPECCOPOL(spec_file);
 
                 # indexes vector containing Cloudnet data corresponding to the spectra time vector:
                 #clnet_it = @. spec[:time][1] ≤ clnet[:time] ≤ spec[:time][end];
 
+                # =
                 # XdB is Dict with adapted feature, mask and index of spec time to cloudnet:
+                # * cln_time : is the DateTime vector to select from the spectrum time series,
+                # * var : either :Znn for sprectral reflectivity or :SNR for signal-to-noise ratio,
+                # * LimHm: (min altitude, max altitude) same units as radar range, 
+                # * Δs: time window to consider the spectrum in seconds,
+                # * Normalize: parameters to use for normalization of the spectrum.
                 XdB = voodoo.adapt_RadarData(spec,
                                              cln_time=clnet[:time],
                                              var=spec_var,
                                              LimHm=(clnet[:height][1]-clnet[:alt] ,10f3),
                                              Δs=3,
-                                             norm_params=spec_params);
-
+                                             Normalize=spec_params); #norm_params=spec_params);
+                
                 # Creating output zarr file name:
                 zfilen = let fn = basename(spec_file)
                     replace(fn, "M1.a1."=>".$(spec_var).",
@@ -107,9 +116,10 @@ for yy ∈ years
                 end
                 
                 try
-                    voodoo.to_zarr(XdB, clnet, zfilen)
+                    voodoo.to_zarr(XdB, clnet, zfilen; var=spec_var)
                 catch e
-                    @warn "voodoo to zarr failed at $(dd).$(mm).$(yy)! $(basename(spec_file))"
+                    println(size(XdB[:features][spec_var]))
+                    @warn "voodoo to zarr failed at $(dd).$(mm).$(yy)! $(basename(spec_file)) $(zfilen)"
                     println(e)
                 end
 
